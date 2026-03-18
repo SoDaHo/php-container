@@ -83,6 +83,33 @@ class CacheIntegrationTest extends TestCase
         $this->assertFileExists($this->cacheFile);
     }
 
+    public function testEnableCacheAfterResolvingServices(): void
+    {
+        $container = Container::create()->setDebug(false);
+
+        // Resolve services before enabling cache
+        $controller1 = $container->get(Fixtures\TestController::class);
+
+        // Enable cache after resolution
+        $container->enableCache($this->cacheFile, $this->signatureKey);
+        $container->saveCache();
+
+        // Cache should contain the previously resolved metadata
+        $this->assertFileExists($this->cacheFile);
+
+        // Verify cache is usable in a new container
+        $container2 = Container::create([
+            'debug' => false,
+            'cacheFile' => $this->cacheFile,
+            'cacheSignature' => $this->signatureKey,
+        ]);
+
+        $controller2 = $container2->get(Fixtures\TestController::class);
+
+        $this->assertInstanceOf(Fixtures\TestController::class, $controller2);
+        $this->assertInstanceOf(Fixtures\TestService::class, $controller2->service);
+    }
+
     // ==================== Cache with Dependencies ====================
 
     public function testCacheWithDefaultValues(): void

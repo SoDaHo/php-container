@@ -74,6 +74,7 @@ class ContainerCache
         // Atomic write (prevents partial reads)
         $tempFile = $this->cacheFile . '.tmp.' . bin2hex(random_bytes(8));
         if (file_put_contents($tempFile, $content) === false) {
+            @unlink($tempFile);
             throw CacheException::writeFailed($this->cacheFile);
         }
 
@@ -84,6 +85,11 @@ class ContainerCache
             throw CacheException::writeFailed($this->cacheFile);
         }
         // @codeCoverageIgnoreEnd
+
+        // Invalidate OPcache so the new file is picked up immediately
+        if (function_exists('opcache_invalidate')) {
+            opcache_invalidate($this->cacheFile, true);
+        }
     }
 
     /**
