@@ -78,6 +78,17 @@ class ServiceWithUnionNoDefault
     }
 }
 
+interface CountableService extends ServiceInterface, \Countable
+{
+}
+
+class ServiceWithIntersectionNoDefault
+{
+    public function __construct(public ServiceInterface&\Countable $value)
+    {
+    }
+}
+
 class ServiceWithNoTypeDefault
 {
     public function __construct(public $value = 'default')

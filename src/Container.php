@@ -6,6 +6,7 @@ namespace Sodaho\Container;
 
 use Psr\Container\ContainerInterface;
 use ReflectionClass;
+use ReflectionIntersectionType;
 use ReflectionNamedType;
 use ReflectionParameter;
 use ReflectionUnionType;
@@ -361,13 +362,13 @@ class Container implements ContainerInterface
     {
         $type = $param->getType();
 
-        // No type hint or Union Types (not supported for simplicity)
-        if (!$type || $type instanceof ReflectionUnionType) {
+        // No type hint, Union Types or Intersection Types (not supported for simplicity)
+        if (!$type || $type instanceof ReflectionUnionType || $type instanceof ReflectionIntersectionType) {
             if ($param->isDefaultValueAvailable()) {
                 return ['value' => $param->getDefaultValue(), 'depId' => null];
             }
             throw new ContainerException(
-                "Cannot resolve parameter '{$param->getName()}' in class '$classId'. No type hint or union type."
+                "Cannot resolve parameter '{$param->getName()}' in class '$classId'. No type hint, union type, or intersection type. Use set() to define this service manually."
             );
         }
 

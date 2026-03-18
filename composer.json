@@ -24,9 +24,12 @@
             "Sodaho\\Container\\Tests\\": "tests/"
         },
         "classmap": [
-            "tests/Unit/Fixtures/",
+            "tests/Unit/Fixtures/TestFixtures.php",
             "tests/Integration/Fixtures/",
             "tests/Feature/Fixtures/"
+        ],
+        "exclude-from-classmap": [
+            "tests/Unit/Fixtures/Php82/"
         ]
     },
     "scripts": {

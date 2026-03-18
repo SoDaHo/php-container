@@ -230,9 +230,30 @@ class ContainerTest extends TestCase
         $container = new Container();
 
         $this->expectException(ContainerException::class);
-        $this->expectExceptionMessage('No type hint or union type');
+        $this->expectExceptionMessage('union type, or intersection type');
 
         $container->get(Fixtures\ServiceWithUnionNoDefault::class);
+    }
+
+    public function testIntersectionTypeWithoutDefaultThrows(): void
+    {
+        $container = new Container();
+
+        $this->expectException(ContainerException::class);
+        $this->expectExceptionMessage('intersection type');
+
+        $container->get(Fixtures\ServiceWithIntersectionNoDefault::class);
+    }
+
+    #[\PHPUnit\Framework\Attributes\RequiresPhp('>=8.2')]
+    public function testIntersectionTypeWithDefaultUsesDefault(): void
+    {
+        require_once __DIR__ . '/Fixtures/Php82/Php82Fixtures.php';
+
+        $container = new Container();
+        $service = $container->get(Fixtures\ServiceWithIntersectionNullableDefault::class);
+
+        $this->assertNull($service->value);
     }
 
     public function testNoTypeHintWithDefaultValue(): void
@@ -248,7 +269,7 @@ class ContainerTest extends TestCase
         $container = new Container();
 
         $this->expectException(ContainerException::class);
-        $this->expectExceptionMessage('No type hint or union type');
+        $this->expectExceptionMessage('union type, or intersection type');
 
         $container->get(Fixtures\ServiceWithNoTypeNoDefault::class);
     }
