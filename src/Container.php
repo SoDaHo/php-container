@@ -360,6 +360,13 @@ class Container implements ContainerInterface
     /** @return array{value: mixed, depId: string|null} */
     private function resolveParameter(ReflectionParameter $param, string $classId): array
     {
+        // Variadic parameters (...$args) are not supported for autowiring
+        if ($param->isVariadic()) {
+            throw new ContainerException(
+                "Cannot resolve variadic parameter '...{$param->getName()}' in class '$classId'. Use set() to define this service manually."
+            );
+        }
+
         $type = $param->getType();
 
         // No type hint, Union Types or Intersection Types (not supported for simplicity)

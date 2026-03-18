@@ -274,6 +274,30 @@ class ContainerTest extends TestCase
         $container->get(Fixtures\ServiceWithNoTypeNoDefault::class);
     }
 
+    public function testVariadicParameterThrows(): void
+    {
+        $container = new Container();
+
+        $this->expectException(ContainerException::class);
+        $this->expectExceptionMessage("variadic parameter '...services'");
+
+        $container->get(Fixtures\ServiceWithVariadic::class);
+    }
+
+    public function testVariadicParameterWithManualDefinition(): void
+    {
+        $container = new Container();
+        $container->set(Fixtures\ServiceWithVariadic::class, fn (Container $c) => new Fixtures\ServiceWithVariadic(
+            $c->get(Fixtures\TestService::class),
+            $c->get(Fixtures\TestService::class),
+        ));
+
+        $service = $container->get(Fixtures\ServiceWithVariadic::class);
+
+        $this->assertCount(2, $service->services);
+        $this->assertSame($service->services[0], $service->services[1]);
+    }
+
     public function testAbstractClassThrowsException(): void
     {
         $container = new Container();

@@ -159,6 +159,19 @@ class SelfDependent
     }
 }
 
+// ==================== Variadic Parameters ====================
+
+class ServiceWithVariadic
+{
+    /** @var TestService[] */
+    public array $services;
+
+    public function __construct(TestService ...$services)
+    {
+        $this->services = $services;
+    }
+}
+
 // ==================== Constructor Exception ====================
 
 class ServiceThrowsInConstructor
