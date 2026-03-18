@@ -41,6 +41,8 @@ class Container implements ContainerInterface
     private array $resolvedMeta = [];
 
     private ?ContainerCache $cache = null;
+    private ?string $cacheFile = null;
+    private ?string $cacheSignature = null;
     private bool $debug = false;
     private bool $cacheLoaded = false;
     private bool $cacheDirty = false;
@@ -65,12 +67,10 @@ class Container implements ContainerInterface
                 ?: in_array(self::env('APP_ENV') ?? '', ['local', 'dev', 'development'], true);
         }
 
-        $cacheFile = $config['cacheFile'] ?? self::env('CONTAINER_CACHE_FILE');
-        $cacheSignature = $config['cacheSignature'] ?? self::env('CONTAINER_CACHE_KEY');
+        $this->cacheFile = $config['cacheFile'] ?? self::env('CONTAINER_CACHE_FILE');
+        $this->cacheSignature = $config['cacheSignature'] ?? self::env('CONTAINER_CACHE_KEY');
 
-        if ($cacheFile !== null) {
-            $this->cache = new ContainerCache($cacheFile, $cacheSignature, !$this->debug);
-        }
+        $this->rebuildCache();
     }
 
     /**
@@ -107,7 +107,10 @@ class Container implements ContainerInterface
      */
     public function enableCache(string $file, ?string $signature = null): self
     {
-        $this->cache = new ContainerCache($file, $signature, !$this->debug);
+        $this->cacheFile = $file;
+        $this->cacheSignature = $signature;
+        $this->cacheLoaded = false;
+        $this->rebuildCache();
         return $this;
     }
 
@@ -119,6 +122,9 @@ class Container implements ContainerInterface
     public function setDebug(bool $debug): self
     {
         $this->debug = $debug;
+        $this->cacheLoaded = false;
+        $this->cacheDirty = false;
+        $this->rebuildCache();
         return $this;
     }
 
@@ -226,9 +232,21 @@ class Container implements ContainerInterface
         return $this->cache?->clear() ?? false;
     }
 
+    /**
+     * Rebuild the ContainerCache instance from current state.
+     */
+    private function rebuildCache(): void
+    {
+        if ($this->cacheFile !== null) {
+            $this->cache = new ContainerCache($this->cacheFile, $this->cacheSignature, !$this->debug);
+        } else {
+            $this->cache = null;
+        }
+    }
+
     private function loadCache(): void
     {
-        if ($this->cacheLoaded || $this->cache === null) {
+        if ($this->cacheLoaded || $this->cache === null || $this->debug) {
             return;
         }
 

@@ -71,6 +71,68 @@ class CacheIntegrationTest extends TestCase
         $this->assertFileDoesNotExist($this->cacheFile);
     }
 
+    public function testSetDebugTrueAfterConstructorPreventsCacheLoading(): void
+    {
+        // First: build and save cache
+        $container1 = Container::create([
+            'debug' => false,
+            'cacheFile' => $this->cacheFile,
+            'cacheSignature' => $this->signatureKey,
+        ]);
+        $container1->get(Fixtures\TestController::class);
+        $container1->saveCache();
+        $this->assertFileExists($this->cacheFile);
+
+        // Second: create with cache, then switch to debug
+        $container2 = Container::create([
+            'debug' => false,
+            'cacheFile' => $this->cacheFile,
+            'cacheSignature' => $this->signatureKey,
+        ]);
+        $container2->setDebug(true);
+
+        // Should NOT load cache in debug mode
+        $misses = [];
+        $hits = [];
+        $container2->on('cacheMiss', function (array $data) use (&$misses) {
+            $misses[] = $data['id'];
+        });
+        $container2->on('cacheHit', function (array $data) use (&$hits) {
+            $hits[] = $data['id'];
+        });
+
+        $container2->get(Fixtures\TestController::class);
+
+        $this->assertEmpty($hits, 'Cache should not be read in debug mode');
+    }
+
+    public function testSetDebugTrueAfterConstructorPreventsCacheWriting(): void
+    {
+        $container = Container::create([
+            'debug' => false,
+            'cacheFile' => $this->cacheFile,
+            'cacheSignature' => $this->signatureKey,
+        ]);
+        $container->setDebug(true);
+
+        $container->get(Fixtures\TestController::class);
+        $container->saveCache();
+
+        $this->assertFileDoesNotExist($this->cacheFile);
+    }
+
+    public function testSetDebugFalseAfterConstructorEnablesCaching(): void
+    {
+        $container = Container::create(['debug' => true])
+            ->enableCache($this->cacheFile, $this->signatureKey)
+            ->setDebug(false);
+
+        $container->get(Fixtures\TestController::class);
+        $container->saveCache();
+
+        $this->assertFileExists($this->cacheFile);
+    }
+
     public function testEnableCacheFluentApi(): void
     {
         $container = Container::create()

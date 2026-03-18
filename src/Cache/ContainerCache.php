@@ -87,9 +87,11 @@ class ContainerCache
         // @codeCoverageIgnoreEnd
 
         // Invalidate OPcache so the new file is picked up immediately
+        // @codeCoverageIgnoreStart
         if (function_exists('opcache_invalidate')) {
             opcache_invalidate($this->cacheFile, true);
         }
+        // @codeCoverageIgnoreEnd
     }
 
     /**
