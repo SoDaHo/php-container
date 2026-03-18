@@ -203,7 +203,7 @@ class Container implements ContainerInterface
         return array_key_exists($id, $this->instances)
             || isset($this->definitions[$id])
             || isset($this->aliases[$id])
-            || class_exists($id);
+            || (class_exists($id) && (new ReflectionClass($id))->isInstantiable());
     }
 
     /**

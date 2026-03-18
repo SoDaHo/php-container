@@ -75,6 +75,28 @@ class ContainerTest extends TestCase
         $this->assertFalse($container->has('non.existent.service'));
     }
 
+    public function testHasReturnsFalseForAbstractClass(): void
+    {
+        $container = new Container();
+
+        $this->assertFalse($container->has(Fixtures\AbstractService::class));
+    }
+
+    public function testHasReturnsFalseForInterfaceWithoutBinding(): void
+    {
+        $container = new Container();
+
+        $this->assertFalse($container->has(Fixtures\ServiceInterface::class));
+    }
+
+    public function testHasReturnsTrueForBoundInterface(): void
+    {
+        $container = new Container();
+        $container->bind(Fixtures\ServiceInterface::class, Fixtures\ConcreteService::class);
+
+        $this->assertTrue($container->has(Fixtures\ServiceInterface::class));
+    }
+
     public function testGetThrowsNotFoundForNonExistentClass(): void
     {
         $container = new Container();
