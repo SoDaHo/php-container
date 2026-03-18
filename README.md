@@ -307,7 +307,7 @@ The container is intentionally minimal. It does **not** support:
 
 ## Requirements
 
-- PHP ^8.1
+- PHP ^8.2
 - psr/container ^2.0
 
 ## License
