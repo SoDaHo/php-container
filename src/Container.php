@@ -103,7 +103,7 @@ class Container implements ContainerInterface
      * Enable caching (fluent API).
      *
      * @param string $file Path to cache file
-     * @param string|null $signature Optional HMAC key
+     * @param string|null $signature HMAC key for integrity verification (required in production)
      */
     public function enableCache(string $file, ?string $signature = null): self
     {
@@ -158,7 +158,7 @@ class Container implements ContainerInterface
      *
      * @param string $id Identifier of the entry to look for.
      *
-     * @throws NotFoundException No entry was found for **this** identifier.
+     * @throws NotFoundException No entry was found for this identifier.
      * @throws ContainerException Error while retrieving the entry.
      *
      * @return mixed Entry.

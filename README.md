@@ -299,7 +299,7 @@ The container is intentionally minimal. It does **not** support:
 | Factories | **Supported** | `set()` method |
 | Caching | **Supported** | `enableCache()` / config |
 | Union types | Default only | Use `set()` for manual definition |
-| Intersection types | Not supported | Use `set()` for manual definition |
+| Intersection types | Default only | Use `set()` for manual definition |
 | Attributes | Not supported | Use `set()` for configuration |
 | Tagged services | Not supported | Not needed for simple DI |
 | Lazy proxies | Not supported | Would require code generation |
