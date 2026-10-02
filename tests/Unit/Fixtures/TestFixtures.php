@@ -181,3 +181,10 @@ class ServiceThrowsInConstructor
         throw new \RuntimeException('Constructor failed intentionally');
     }
 }
+
+class ServiceWithNullableNoDefault
+{
+    public function __construct(public ?NonExistentInterface $dep)
+    {
+    }
+}

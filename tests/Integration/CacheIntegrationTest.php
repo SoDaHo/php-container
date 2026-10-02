@@ -292,11 +292,8 @@ class CacheIntegrationTest extends TestCase
         $container1->get(Fixtures\TestController::class);
         $container1->saveCache();
 
-        $mtime1 = filemtime($this->cacheFile);
-        clearstatcache();
-
-        // Wait a moment
-        usleep(10000);
+        // save() moves a fresh temp file into place, so any rewrite changes the inode
+        $inode1 = fileinode($this->cacheFile);
 
         // Second: load from cache, don't resolve new classes
         $container2 = Container::create([
@@ -308,9 +305,8 @@ class CacheIntegrationTest extends TestCase
         $container2->saveCache(); // Should NOT write (not dirty)
 
         clearstatcache();
-        $mtime2 = filemtime($this->cacheFile);
 
-        $this->assertEquals($mtime1, $mtime2, 'Cache should not be rewritten if not dirty');
+        $this->assertSame($inode1, fileinode($this->cacheFile), 'Cache should not be rewritten if not dirty');
     }
 
     public function testCacheUpdatedWhenNewClassResolved(): void

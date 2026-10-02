@@ -229,7 +229,7 @@ class ContainerTest extends TestCase
         $this->assertNull($service->optional);
     }
 
-    public function testNullableDependencyUsesNull(): void
+    public function testNullableDependencyWithDefaultUsesDefault(): void
     {
         $container = new Container();
         $service = $container->get(Fixtures\ServiceWithNullableDep::class);
@@ -580,5 +580,115 @@ class ContainerTest extends TestCase
         $this->expectExceptionMessage('Hook failed');
 
         $container->get(\stdClass::class);
+    }
+
+    public function testDefinitionAndBindingForAnEntryThatAlreadyExistsHaveNoEffect(): void
+    {
+        $container = new Container();
+        $container->set('service', fn () => new Fixtures\ConcreteService());
+        $container->bind(Fixtures\ServiceInterface::class, Fixtures\ConcreteService::class);
+        $service = $container->get('service');
+        $bound = $container->get(Fixtures\ServiceInterface::class);
+
+        $container->set('service', fn () => new Fixtures\AlternativeService());
+        $container->bind(Fixtures\ServiceInterface::class, Fixtures\AlternativeService::class);
+
+        $this->assertSame($service, $container->get('service'));
+        $this->assertSame($bound, $container->get(Fixtures\ServiceInterface::class));
+    }
+
+    // ==================== Cycles Outside of Autowiring ====================
+
+    public function testCircularDependencyChainIsExact(): void
+    {
+        $container = new Container();
+
+        $this->expectException(ContainerException::class);
+        $this->expectExceptionMessage(
+            'Circular dependency detected: ' . Fixtures\CircularA::class . ' -> ' . Fixtures\CircularB::class . ' -> ' . Fixtures\CircularA::class
+        );
+
+        $container->get(Fixtures\CircularA::class);
+    }
+
+    // ==================== Optional Dependencies ====================
+
+    public function testNullableDependencyWithoutDefaultThrows(): void
+    {
+        $container = new Container();
+
+        $this->expectException(ContainerException::class);
+        $this->expectExceptionMessage("Cannot resolve dependency '" . Fixtures\NonExistentInterface::class . "' for parameter 'dep'");
+
+        $container->get(Fixtures\ServiceWithNullableNoDefault::class);
+    }
+
+    // ==================== Hooks: error ====================
+
+    public function testErrorHookReportsEachFactoryOnTheWayUp(): void
+    {
+        $container = new Container();
+        $ids = [];
+        $container->on('error', function (array $data) use (&$ids) {
+            $ids[] = $data['id'];
+        });
+        $container->set('outer', fn (Container $c) => $c->get('inner'));
+        $container->set('inner', fn () => throw new \RuntimeException('Oops'));
+
+        try {
+            $container->get('outer');
+            $this->fail('Expected ContainerException');
+        } catch (ContainerException $e) {
+            $this->assertSame("Error while creating service 'outer': Error while creating service 'inner': Oops", $e->getMessage());
+        }
+
+        $this->assertSame(['inner', 'outer'], $ids);
+    }
+
+    // ==================== Hooks: resolve ====================
+
+    public function testResolveHookReceivesWhateverAFactoryReturns(): void
+    {
+        $container = new Container();
+        $events = [];
+        $container->on('resolve', function (array $data) use (&$events) {
+            $events[] = $data;
+        });
+        $container->set('app.name', fn () => 'My Application');
+
+        $container->get('app.name');
+
+        $this->assertSame([['id' => 'app.name', 'instance' => 'My Application']], $events);
+    }
+
+    public function testResolveHookIsFiredForTheImplementationNotForTheAlias(): void
+    {
+        $container = new Container();
+        $ids = [];
+        $container->on('resolve', function (array $data) use (&$ids) {
+            $ids[] = $data['id'];
+        });
+        $container->bind(Fixtures\ServiceInterface::class, Fixtures\ConcreteService::class);
+
+        $container->get(Fixtures\ServiceInterface::class);
+        $container->get(Fixtures\ServiceInterface::class);
+
+        $this->assertSame([Fixtures\ConcreteService::class], $ids);
+    }
+
+    public function testTwoHooksForOneEventBothRunInOrder(): void
+    {
+        $container = new Container();
+        $order = [];
+        $container->on('resolve', function () use (&$order) {
+            $order[] = 'first';
+        });
+        $container->on('resolve', function () use (&$order) {
+            $order[] = 'second';
+        });
+
+        $container->get(\stdClass::class);
+
+        $this->assertSame(['first', 'second'], $order);
     }
 }
