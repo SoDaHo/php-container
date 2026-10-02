@@ -1084,6 +1084,49 @@ class ContainerTest extends TestCase
         );
     }
 
+    /**
+     * @return array<string, array{array<string, string>, string}>
+     */
+    public static function brokenBindings(): array
+    {
+        return [
+            'class that does not exist' => [
+                [Fixtures\ServiceInterface::class => 'Missing\\Typo'],
+                "Cannot resolve dependency '" . Fixtures\ServiceInterface::class . "' for parameter 'service'",
+            ],
+            'abstract class' => [
+                [Fixtures\ServiceInterface::class => Fixtures\AbstractService::class],
+                "Class '" . Fixtures\AbstractService::class . "' is not instantiable",
+            ],
+            'cycle' => [
+                [Fixtures\ServiceInterface::class => Fixtures\FirstInterface::class, Fixtures\FirstInterface::class => Fixtures\ServiceInterface::class],
+                'Circular dependency detected',
+            ],
+            'interface bound to itself' => [
+                [Fixtures\ServiceInterface::class => Fixtures\ServiceInterface::class],
+                "Cannot resolve dependency '" . Fixtures\ServiceInterface::class . "' for parameter 'service'",
+            ],
+        ];
+    }
+
+    /**
+     * @param array<string, class-string> $bindings
+     */
+    #[DataProvider('brokenBindings')]
+    public function testOptionalDependencyWithABrokenBindingIsAnError(array $bindings, string $message): void
+    {
+        $container = new Container();
+        foreach ($bindings as $interface => $implementation) {
+            $container->bind($interface, $implementation);
+        }
+
+        // A binding says what is wanted: falling back to the default would hide the mistake
+        $this->expectException(ContainerException::class);
+        $this->expectExceptionMessage($message);
+
+        $container->get(Fixtures\ServiceWithOptionalInterface::class);
+    }
+
     public function testOptionalDependencyThatExistsButCannotBeBuiltStaysAnError(): void
     {
         $container = new Container();

@@ -310,8 +310,8 @@ class Container implements ContainerInterface
         foreach ($parameters as $index => $param) {
             $depId = $dependencies[$index];
 
-            // No class dependency, or an optional one the container cannot provide: the default
-            if ($depId === null || ($param->isOptional() && !$this->has($depId))) {
+            // No class dependency, or an optional one nothing is bound to and the container cannot create: the default
+            if ($depId === null || ($param->isOptional() && !isset($this->aliases[$depId]) && !$this->has($depId))) {
                 $arguments[] = $this->defaultValue($id, $param);
                 continue;
             }
