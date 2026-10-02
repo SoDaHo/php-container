@@ -15,7 +15,7 @@ use Sodaho\Container\Exception\NotFoundException;
 use Sodaho\Container\Traits\HasHooks;
 
 /**
- * Lightweight PSR-11 container with autowiring and optional caching.
+ * Lightweight PSR-11 container with autowiring and optional caching (deprecated, removed in 2.0).
  *
  * Hooks:
  * - 'resolve': Triggered when a new entry is created. Data: ['id' => string, 'instance' => mixed]
@@ -140,6 +140,8 @@ class Container implements ContainerInterface
     /**
      * Enable caching (fluent API).
      *
+     * @deprecated 1.1.0 The cache is removed in 2.0.
+     *
      * @param string $file Path to cache file
      * @param string|null $signature HMAC key for integrity verification (required in production);
      *                               null keeps the key that is already configured
@@ -157,6 +159,8 @@ class Container implements ContainerInterface
 
     /**
      * Disable caching (fluent API). Nothing is read from or written to a cache file afterwards.
+     *
+     * @deprecated 1.1.0 The cache is removed in 2.0.
      */
     public function disableCache(): self
     {
@@ -315,6 +319,8 @@ class Container implements ContainerInterface
      *
      * Only writes if new classes were resolved during this request or a file from 1.0.x has to be replaced.
      *
+     * @deprecated 1.1.0 The cache is removed in 2.0.
+     *
      * @throws CacheException If the file cannot be written
      */
     public function saveCache(): void
@@ -327,6 +333,8 @@ class Container implements ContainerInterface
 
     /**
      * Clear the cache.
+     *
+     * @deprecated 1.1.0 The cache is removed in 2.0.
      *
      * @return bool True if a file was deleted
      */

@@ -6,6 +6,8 @@ namespace Sodaho\Container\Exception;
 
 /**
  * Exception for cache-related errors.
+ *
+ * @deprecated 1.1.0 The cache is removed in 2.0.
  */
 class CacheException extends ContainerException
 {
