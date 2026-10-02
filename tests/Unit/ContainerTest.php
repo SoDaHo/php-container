@@ -622,6 +622,14 @@ class ContainerTest extends TestCase
         $this->assertSame([$container], $seen);
     }
 
+    public function testCreateOnASubclassReturnsTheSubclass(): void
+    {
+        $container = Fixtures\ContainerWithBootEvent::create();
+
+        $this->assertInstanceOf(Fixtures\ContainerWithBootEvent::class, $container);
+        $this->assertSame($container, $container->on('boot', fn () => null));
+    }
+
     public function testSubclassEventIsUnknownToTheContainerItself(): void
     {
         $this->expectException(ContainerException::class);

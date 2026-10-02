@@ -69,9 +69,10 @@ class Container implements ContainerInterface
      *
      * @throws ContainerException If an option is passed
      */
-    public static function create(array $config = []): self
+    public static function create(array $config = []): static
     {
-        return new self($config);
+        // @phpstan-ignore new.static (a subclass whose constructor takes other arguments does not use create())
+        return new static($config);
     }
 
     /**
