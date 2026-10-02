@@ -583,6 +583,53 @@ class ContainerTest extends TestCase
         $this->assertSame($container, $result);
     }
 
+    /**
+     * @return array<string, array{string}>
+     */
+    public static function unknownEvents(): array
+    {
+        return [
+            'removed in 2.0' => ['cacheHit'],
+            'removed in 2.0, too' => ['cacheMiss'],
+            'typo' => ['resolved'],
+            'case' => ['Error'],
+            'empty' => [''],
+        ];
+    }
+
+    #[DataProvider('unknownEvents')]
+    public function testOnThrowsForAnEventThatDoesNotExist(string $event): void
+    {
+        $container = new Container();
+
+        $this->expectException(ContainerException::class);
+        $this->expectExceptionMessage("Unknown event '$event'. Available: resolve, error.");
+
+        $container->on($event, fn () => null);
+    }
+
+    public function testSubclassAddsItsOwnEvents(): void
+    {
+        $container = new Fixtures\ContainerWithBootEvent();
+        $seen = [];
+        $container->on('boot', function (array $data) use (&$seen) {
+            $seen[] = $data['container'];
+        });
+        $container->on('resolve', fn () => null);
+
+        $container->boot();
+
+        $this->assertSame([$container], $seen);
+    }
+
+    public function testSubclassEventIsUnknownToTheContainerItself(): void
+    {
+        $this->expectException(ContainerException::class);
+        $this->expectExceptionMessage("Unknown event 'boot'. Available: resolve, error.");
+
+        new Container()->on('boot', fn () => null);
+    }
+
     public function testResolveHookIsFired(): void
     {
         $container = new Container();

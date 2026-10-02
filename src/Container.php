@@ -21,7 +21,12 @@ use Sodaho\Container\Traits\HasHooks;
  */
 class Container implements ContainerInterface
 {
-    use HasHooks;
+    use HasHooks {
+        on as private addHook;
+    }
+
+    /** @var list<string> Events on() accepts; a subclass that fires its own adds them here */
+    protected const array EVENTS = ['resolve', 'error'];
 
     /** @var array<string, callable> */
     private array $definitions = [];
@@ -67,6 +72,25 @@ class Container implements ContainerInterface
     public static function create(array $config = []): self
     {
         return new self($config);
+    }
+
+    /**
+     * Register a hook callback for an event.
+     *
+     * @param string $event 'resolve' or 'error'
+     * @param callable $callback Callback receiving event data array
+     *
+     * @throws ContainerException If the event does not exist: the callback would never run
+     */
+    public function on(string $event, callable $callback): static
+    {
+        if (!in_array($event, static::EVENTS, true)) {
+            throw new ContainerException(
+                "Unknown event '$event'. Available: " . implode(', ', static::EVENTS) . '.'
+            );
+        }
+
+        return $this->addHook($event, $callback);
     }
 
     /**

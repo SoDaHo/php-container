@@ -394,3 +394,15 @@ class ContainerWithFallback extends \Sodaho\Container\Container
         return $id === ServiceInterface::class || parent::has($id);
     }
 }
+
+// ==================== A Container With an Event of Its Own ====================
+
+class ContainerWithBootEvent extends \Sodaho\Container\Container
+{
+    protected const array EVENTS = [...parent::EVENTS, 'boot'];
+
+    public function boot(): void
+    {
+        $this->trigger('boot', ['container' => $this]);
+    }
+}
