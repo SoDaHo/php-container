@@ -1717,6 +1717,27 @@ class ContainerTest extends TestCase
         }
     }
 
+    public function testBindingReachedAsADependencyCannotBeRedefined(): void
+    {
+        $container = new Container();
+        $container->bind(Fixtures\ServiceInterface::class, Fixtures\ConcreteService::class);
+        $container->get(Fixtures\ControllerWithInterface::class);
+
+        // The interface was only asked for as a dependency, but it is an entry now
+        $this->expectException(ContainerException::class);
+        $this->expectExceptionMessage("Cannot redefine '" . Fixtures\ServiceInterface::class . "'");
+
+        $container->bind(Fixtures\ServiceInterface::class, Fixtures\AlternativeService::class);
+    }
+
+    public function testSubclassThatProvidesEntriesItselfIsAskedForOptionalDependencies(): void
+    {
+        $service = new Fixtures\ConcreteService();
+        $container = new Fixtures\ContainerWithFallback($service);
+
+        $this->assertSame($service, $container->get(Fixtures\ServiceWithOptionalInterface::class)->service);
+    }
+
     public function testErrorHookExceptionForAMissingDependencyPassesEvenIfItIsAContainerException(): void
     {
         $container = new Container();
