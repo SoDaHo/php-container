@@ -260,6 +260,9 @@ class Container implements ContainerInterface
 
         if ($data !== null) {
             $this->resolvedMeta = $data;
+        } elseif ($this->cache->exists()) {
+            // A file that cannot be used (written by 1.0.x) is replaced by the next saveCache()
+            $this->cacheDirty = true;
         }
     }
 
@@ -366,13 +369,16 @@ class Container implements ContainerInterface
             }
         }
 
-        // Cache the resolution metadata
-        $this->resolvedMeta[$id] = [
+        // Cache the resolution metadata, unless a default is an object the data file cannot hold
+        $meta = [
             'class' => $id,
             'dependencies' => $depIds,
             'defaults' => $defaults,
         ];
-        $this->cacheDirty = true;
+        if (ContainerCache::isCacheable($meta)) {
+            $this->resolvedMeta[$id] = $meta;
+            $this->cacheDirty = true;
+        }
 
         try {
             $instance = $reflector->newInstanceArgs($dependencies);

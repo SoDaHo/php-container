@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace Sodaho\Container\Tests\Integration;
 
 use PHPUnit\Framework\TestCase;
+use Sodaho\Container\Cache\ContainerCache;
 use Sodaho\Container\Container;
 use Sodaho\Container\Exception\CacheException;
+use Sodaho\Container\Tests\Unit\Fixtures as UnitFixtures;
 
 /**
  * Integration tests for Container + Cache working together.
@@ -26,6 +28,45 @@ class CacheIntegrationTest extends TestCase
         if (file_exists($this->cacheFile)) {
             unlink($this->cacheFile);
         }
+    }
+
+    private function container(): Container
+    {
+        return Container::create([
+            'debug' => false,
+            'cacheFile' => $this->cacheFile,
+            'cacheSignature' => $this->signatureKey,
+        ]);
+    }
+
+    /**
+     * Resolve the ids in a first request and save the cache.
+     *
+     * @param list<string> $ids
+     */
+    private function warm(array $ids): void
+    {
+        $container = $this->container();
+        foreach ($ids as $id) {
+            $container->get($id);
+        }
+        $container->saveCache();
+    }
+
+    /**
+     * @return array{hit: list<string>, miss: list<string>}
+     */
+    private function &countCacheEvents(Container $container): array
+    {
+        $events = ['hit' => [], 'miss' => []];
+        $container->on('cacheHit', function (array $data) use (&$events) {
+            $events['hit'][] = $data['id'];
+        });
+        $container->on('cacheMiss', function (array $data) use (&$events) {
+            $events['miss'][] = $data['id'];
+        });
+
+        return $events;
     }
 
     // ==================== Cache Save/Load Cycle ====================
@@ -375,33 +416,24 @@ class CacheIntegrationTest extends TestCase
 
     public function testClearCacheResetsInternalState(): void
     {
-        // First container: build and save cache
-        $container1 = Container::create([
-            'debug' => false,
-            'cacheFile' => $this->cacheFile,
-            'cacheSignature' => $this->signatureKey,
-        ]);
-
-        $container1->get(Fixtures\TestController::class);
-        $container1->saveCache();
+        $container = $this->container();
+        $container->get(Fixtures\TestService::class);
+        $container->saveCache();
         $this->assertFileExists($this->cacheFile);
 
-        // Clear cache
-        $container1->clearCache();
+        $container->clearCache();
         $this->assertFileDoesNotExist($this->cacheFile);
 
-        // New container: should rebuild cache from scratch
-        $container2 = Container::create([
-            'debug' => false,
-            'cacheFile' => $this->cacheFile,
-            'cacheSignature' => $this->signatureKey,
-        ]);
+        // The same container starts over: a new class is a miss again and only that class is written
+        $events = &$this->countCacheEvents($container);
+        $container->get(Fixtures\ServiceWithDefaults::class);
+        $container->saveCache();
 
-        $container2->get(Fixtures\TestController::class);
-        $container2->saveCache();
-
-        // Cache should be recreated
-        $this->assertFileExists($this->cacheFile);
+        $this->assertSame([Fixtures\ServiceWithDefaults::class], $events['miss']);
+        $this->assertSame(
+            [Fixtures\ServiceWithDefaults::class],
+            array_keys((array) (new ContainerCache($this->cacheFile, $this->signatureKey))->load())
+        );
     }
 
     // ==================== Cache Hooks ====================
@@ -469,5 +501,156 @@ class CacheIntegrationTest extends TestCase
 
         $this->assertEmpty($hits);
         $this->assertEmpty($misses);
+    }
+
+    // ==================== Defaults That Cannot Be Cached ====================
+
+    public function testClassWithUncacheableDefaultIsNotCachedAndDoesNotForceRewrites(): void
+    {
+        // An untyped parameter always gets its default, so the object would have to be stored
+        $this->warm([Fixtures\TestService::class, UnitFixtures\ServiceWithUntypedObjectDefault::class]);
+
+        $content = (string) file_get_contents($this->cacheFile);
+        $this->assertStringContainsString('TestService', $content);
+        $this->assertStringNotContainsString('ServiceWithUntypedObjectDefault', $content);
+        $inode = fileinode($this->cacheFile);
+
+        $container = $this->container();
+        $events = &$this->countCacheEvents($container);
+        $service = $container->get(UnitFixtures\ServiceWithUntypedObjectDefault::class);
+        $container->get(Fixtures\TestService::class);
+        $container->saveCache();
+        clearstatcache();
+
+        $this->assertInstanceOf(UnitFixtures\FileLogger::class, $service->logger);
+        $this->assertSame([Fixtures\TestService::class], $events['hit'], 'The cache still serves the other classes');
+        $this->assertSame([UnitFixtures\ServiceWithUntypedObjectDefault::class], $events['miss']);
+        $this->assertSame($inode, fileinode($this->cacheFile), 'A class that cannot be cached must not make every request rewrite the file');
+    }
+
+    // ==================== Signature Errors ====================
+
+    public function testAfterASignatureErrorTheContainerWorksWithoutTheCacheAndReplacesTheFile(): void
+    {
+        $this->warm([Fixtures\TestService::class]);
+        $rotated = Container::create(['debug' => false, 'cacheFile' => $this->cacheFile, 'cacheSignature' => 'new-key']);
+
+        try {
+            $rotated->get(Fixtures\TestService::class);
+            $this->fail('Expected CacheException');
+        } catch (CacheException) {
+            // Reported once; an application that carries on gets a working container
+        }
+
+        $this->assertInstanceOf(Fixtures\TestService::class, $rotated->get(Fixtures\TestService::class));
+        $rotated->saveCache();
+
+        $next = Container::create(['debug' => false, 'cacheFile' => $this->cacheFile, 'cacheSignature' => 'new-key']);
+        $events = &$this->countCacheEvents($next);
+        $next->get(Fixtures\TestService::class);
+        $this->assertSame([Fixtures\TestService::class], $events['hit']);
+    }
+
+    public function testFactoryServicesNeverReadTheCacheFile(): void
+    {
+        file_put_contents($this->cacheFile, 'not a cache file');
+        $container = $this->container();
+        $container->set('value', fn () => 42);
+
+        $this->assertSame(42, $container->get('value'));
+    }
+
+    // ==================== Upgrade from 1.0.x ====================
+
+    public function testCacheFileWrittenBy10IsReplacedWithoutBeingExecuted(): void
+    {
+        $marker = $this->cacheFile . '.executed';
+        $export = var_export([
+            Fixtures\TestService::class => ['class' => Fixtures\TestService::class, 'dependencies' => [], 'defaults' => []],
+        ], true);
+        file_put_contents(
+            $this->cacheFile,
+            "<?php\n// HMAC-SHA256: " . hash_hmac('sha256', $export, $this->signatureKey) . "\ntouch(" . var_export($marker, true) . ");\nreturn {$export};"
+        );
+
+        $upgraded = $this->container();
+        $events = &$this->countCacheEvents($upgraded);
+        $this->assertInstanceOf(Fixtures\TestService::class, $upgraded->get(Fixtures\TestService::class));
+        $upgraded->saveCache();
+
+        $this->assertFileDoesNotExist($marker);
+        $this->assertSame([Fixtures\TestService::class], $events['miss']);
+        $this->assertStringStartsWith('<?php __halt_compiler(); ?>', (string) file_get_contents($this->cacheFile));
+
+        $next = $this->container();
+        $events = &$this->countCacheEvents($next);
+        $next->get(Fixtures\TestService::class);
+        $this->assertSame([Fixtures\TestService::class], $events['hit']);
+    }
+
+    public function testCacheFileWrittenBy10IsReplacedEvenIfNothingCacheableWasResolved(): void
+    {
+        file_put_contents($this->cacheFile, "<?php\n// HMAC-SHA256: " . str_repeat('a', 64) . "\nreturn array ();");
+
+        $container = $this->container();
+        $container->get(UnitFixtures\ServiceWithUntypedObjectDefault::class);
+        $container->saveCache();
+
+        $this->assertStringStartsWith('<?php __halt_compiler(); ?>', (string) file_get_contents($this->cacheFile));
+        $this->assertSame([], (new ContainerCache($this->cacheFile, $this->signatureKey))->load());
+    }
+
+    // ==================== Concurrent First Requests ====================
+
+    public function testConcurrentFirstRequestsLeaveAValidCacheAndEmitNoWarnings(): void
+    {
+        $directory = sys_get_temp_dir() . '/container_concurrency_' . uniqid();
+        $cacheFile = $directory . '/not/yet/there/container.php';
+        $startSignal = sys_get_temp_dir() . '/container_concurrency_' . uniqid() . '.go';
+        $command = [PHP_BINARY, '-d', 'display_errors=1', '-d', 'error_reporting=-1', __DIR__ . '/Workers/first_request.php', $cacheFile, $startSignal];
+
+        $processes = [];
+        $pipes = [];
+        for ($i = 0; $i < 12; $i++) {
+            $process = proc_open($command, [1 => ['pipe', 'w'], 2 => ['redirect', 1]], $pipes[$i]);
+            $this->assertIsResource($process);
+            $processes[$i] = $process;
+        }
+        // Wait until every process is at the start line
+        $deadline = microtime(true) + 10;
+        while (count((array) glob($startSignal . '.ready.*')) < 12 && microtime(true) < $deadline) {
+            usleep(1000);
+        }
+        $ready = count((array) glob($startSignal . '.ready.*'));
+        touch($startSignal);
+
+        $outputs = [];
+        $exitCodes = [];
+        foreach ($processes as $i => $process) {
+            $outputs[] = stream_get_contents($pipes[$i][1]);
+            fclose($pipes[$i][1]);
+            $exitCodes[] = proc_close($process);
+        }
+        array_map('unlink', [$startSignal, ...(array) glob($startSignal . '.ready.*')]);
+
+        try {
+            $this->assertSame(12, $ready, 'Every process must be waiting before the start signal, or nothing races');
+            $this->assertSame(array_fill(0, 12, 'ok'), $outputs);
+            $this->assertSame(array_fill(0, 12, 0), $exitCodes);
+            $this->assertSame(['container.php'], array_values(array_diff((array) scandir(dirname($cacheFile)), ['.', '..'])), 'No temp file left behind');
+
+            $container = Container::create(['debug' => false, 'cacheFile' => $cacheFile, 'cacheSignature' => 'concurrency-key']);
+            $events = &$this->countCacheEvents($container);
+            $container->get(Fixtures\DeepController::class);
+            $container->get(Fixtures\ServiceWithDefaults::class);
+            $this->assertSame([], $events['miss']);
+            $this->assertCount(4, $events['hit']);
+        } finally {
+            @unlink($cacheFile);
+            @rmdir($directory . '/not/yet/there');
+            @rmdir($directory . '/not/yet');
+            @rmdir($directory . '/not');
+            @rmdir($directory);
+        }
     }
 }

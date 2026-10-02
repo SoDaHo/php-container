@@ -182,9 +182,22 @@ class ServiceThrowsInConstructor
     }
 }
 
+enum Mode
+{
+    case Fast;
+    case Safe;
+}
+
 class ServiceWithNullableNoDefault
 {
     public function __construct(public ?NonExistentInterface $dep)
+    {
+    }
+}
+
+class ServiceWithUntypedObjectDefault
+{
+    public function __construct(public $logger = new FileLogger())
     {
     }
 }

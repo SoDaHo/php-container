@@ -49,6 +49,19 @@ class CacheException extends ContainerException
     }
 
     /**
+     * Data holds values that a data-only cache file cannot restore (objects other than enum cases, resources).
+     */
+    public static function notCacheable(): self
+    {
+        return new self(
+            'Cache data is not cacheable',
+            0,
+            null,
+            'Only null, scalars, enum cases and arrays of those can be stored in the cache file.'
+        );
+    }
+
+    /**
      * Cache signature key is required but not provided.
      */
     public static function signatureKeyRequired(): self

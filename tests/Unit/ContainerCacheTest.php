@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Sodaho\Container\Tests\Unit;
 
 use org\bovigo\vfs\vfsStream;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Sodaho\Container\Cache\ContainerCache;
 use Sodaho\Container\Exception\CacheException;
@@ -29,6 +30,26 @@ class ContainerCacheTest extends TestCase
         }
     }
 
+    /**
+     * A cache file as the library writes it, for an arbitrary payload.
+     */
+    private function signed(string $payload, ?string $key = null, string $context = "sodaho/container cache v2\n"): string
+    {
+        return "<?php __halt_compiler(); ?>\nHMAC-SHA256: " . hash_hmac('sha256', $context . $payload, $key ?? $this->signatureKey) . "\n" . $payload;
+    }
+
+    /**
+     * A cache file exactly as 1.0.x wrote it (executable PHP, signature over the export only).
+     *
+     * @param array<mixed> $data
+     */
+    private function legacy(array $data, string $injectedCode = ''): string
+    {
+        $export = var_export($data, true);
+
+        return "<?php\n// HMAC-SHA256: " . hash_hmac('sha256', $export, $this->signatureKey) . "\n{$injectedCode}return {$export};";
+    }
+
     // ==================== Security: Signature Key Required ====================
 
     public function testSignatureKeyRequiredWhenEnabled(): void
@@ -37,6 +58,14 @@ class ContainerCacheTest extends TestCase
         $this->expectExceptionMessage('signature key is required');
 
         new ContainerCache($this->cacheFile, null, true);
+    }
+
+    public function testEmptySignatureKeyIsRejected(): void
+    {
+        $this->expectException(CacheException::class);
+        $this->expectExceptionMessage('signature key is required');
+
+        new ContainerCache($this->cacheFile, '', true);
     }
 
     public function testSignatureKeyNotRequiredWhenDisabled(): void
@@ -67,15 +96,42 @@ class ContainerCacheTest extends TestCase
         $data = [
             'TestClass' => [
                 'class' => 'TestClass',
-                'dependencies' => ['DepA', 'DepB'],
-                'defaults' => [],
+                'dependencies' => ['DepA', null, 'DepB'],
+                'defaults' => [1 => 'fallback', 2 => null],
+                'optional' => [2 => true],
             ],
         ];
 
         $cache->save($data);
-        $loaded = $cache->load();
 
-        $this->assertEquals($data, $loaded);
+        $this->assertSame($data, (new ContainerCache($this->cacheFile, $this->signatureKey))->load());
+    }
+
+    public function testLoadRestoresDefaultValuesExactly(): void
+    {
+        $defaults = [1.0, 0, '0', false, null, "\x00\xff binary", ['nested' => [1, 'a' => 2.5]], PHP_INT_MAX, ''];
+        $cache = new ContainerCache($this->cacheFile, $this->signatureKey);
+
+        $cache->save(['T' => ['defaults' => $defaults]]);
+
+        $this->assertSame(['T' => ['defaults' => $defaults]], $cache->load());
+    }
+
+    public function testEnumCasesSurviveTheRoundTrip(): void
+    {
+        $cache = new ContainerCache($this->cacheFile, $this->signatureKey);
+
+        $cache->save(['T' => ['defaults' => [Fixtures\Mode::Fast]]]);
+
+        $this->assertSame(['T' => ['defaults' => [Fixtures\Mode::Fast]]], $cache->load());
+    }
+
+    public function testEnumCaseThatNoLongerExistsIsAMiss(): void
+    {
+        $payload = str_replace('Mode:Fast', 'Mode:Gone', serialize(['T' => ['defaults' => [Fixtures\Mode::Fast]]]));
+        file_put_contents($this->cacheFile, $this->signed($payload));
+
+        $this->assertNull((new ContainerCache($this->cacheFile, $this->signatureKey))->load());
     }
 
     public function testSaveCreatesDirectory(): void
@@ -86,12 +142,102 @@ class ContainerCacheTest extends TestCase
         $cache->save(['test' => []]);
 
         $this->assertFileExists($deepPath);
+        $this->assertSame(['cache.php'], array_values(array_diff((array) scandir(dirname($deepPath)), ['.', '..'])), 'No temp file left behind');
 
         // Cleanup
         unlink($deepPath);
         rmdir(dirname($deepPath));
         rmdir(dirname(dirname($deepPath)));
         rmdir(dirname(dirname(dirname($deepPath))));
+    }
+
+    public function testSaveReplacesExistingFile(): void
+    {
+        $cache = new ContainerCache($this->cacheFile, $this->signatureKey);
+
+        $cache->save(['first' => []]);
+        $cache->save(['second' => []]);
+
+        $this->assertSame(['second' => []], $cache->load());
+    }
+
+    // ==================== File Format: Data Only ====================
+
+    public function testFileIsGuardLineSignatureLineAndSerializedPayload(): void
+    {
+        $data = ['Test' => ['class' => 'Test', 'dependencies' => [], 'defaults' => [], 'optional' => []]];
+
+        (new ContainerCache($this->cacheFile, $this->signatureKey))->save($data);
+
+        $this->assertSame($this->signed(serialize($data)), file_get_contents($this->cacheFile));
+    }
+
+    public function testFileOutputsNothingWhenExecutedAsPhp(): void
+    {
+        $marker = $this->cacheFile . '.executed';
+        (new ContainerCache($this->cacheFile, $this->signatureKey))->save(
+            ['Test' => ['defaults' => ['<?php touch(' . var_export($marker, true) . '); echo "leak";']]]
+        );
+
+        exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($this->cacheFile) . ' 2>&1', $output, $exitCode);
+
+        $this->assertSame([], $output);
+        $this->assertSame(0, $exitCode);
+        $this->assertFileDoesNotExist($marker);
+    }
+
+    public function testSaveRejectsObjects(): void
+    {
+        $cache = new ContainerCache($this->cacheFile, $this->signatureKey);
+
+        try {
+            $cache->save(['T' => ['defaults' => [0 => ['deep' => new \stdClass()]]]]);
+            $this->fail('Expected CacheException');
+        } catch (CacheException $e) {
+            $this->assertSame('Cache data is not cacheable', $e->getMessage());
+            $this->assertNotNull($e->getDebugMessage());
+        }
+
+        $this->assertFileDoesNotExist($this->cacheFile);
+    }
+
+    /**
+     * @return array<string, array{mixed, bool}>
+     */
+    public static function cacheableValues(): array
+    {
+        return [
+            'null' => [null, true],
+            'int' => [1, true],
+            'float' => [1.5, true],
+            'string' => ['a', true],
+            'bool' => [false, true],
+            'empty array' => [[], true],
+            'nested array' => [['a' => [1, [null, 'x']]], true],
+            'object' => [new \stdClass(), false],
+            'enum case' => [Fixtures\Mode::Fast, true],
+            'enum case nested in array' => [['a' => [Fixtures\Mode::Fast]], true],
+            'closure' => [static fn () => null, false],
+            'object nested in array' => [['a' => [1, [new \stdClass()]]], false],
+            'object after plain values' => [[1, 'a', new \stdClass()], false],
+        ];
+    }
+
+    #[DataProvider('cacheableValues')]
+    public function testIsCacheable(mixed $value, bool $expected): void
+    {
+        $this->assertSame($expected, ContainerCache::isCacheable($value));
+    }
+
+    public function testLoadDoesNotInstantiateObjectsFromPayload(): void
+    {
+        // Only possible for someone who knows the key; the payload still must not create objects
+        file_put_contents($this->cacheFile, $this->signed(serialize(['T' => new \ArrayObject([1])])));
+
+        $loaded = (new ContainerCache($this->cacheFile, $this->signatureKey))->load();
+
+        $this->assertIsArray($loaded);
+        $this->assertInstanceOf(\__PHP_Incomplete_Class::class, $loaded['T']);
     }
 
     // ==================== Disabled Cache ====================
@@ -105,13 +251,18 @@ class ContainerCacheTest extends TestCase
         $this->assertFileDoesNotExist($this->cacheFile);
     }
 
-    public function testLoadDisabledReturnsNull(): void
+    public function testLoadDisabledReturnsNullEvenForValidFile(): void
     {
-        $cache = new ContainerCache($this->cacheFile, null, false);
+        (new ContainerCache($this->cacheFile, $this->signatureKey))->save(['test' => []]);
 
-        $result = $cache->load();
+        $this->assertNull((new ContainerCache($this->cacheFile, $this->signatureKey, false))->load());
+    }
 
-        $this->assertNull($result);
+    public function testLoadDisabledIgnoresTamperedFile(): void
+    {
+        file_put_contents($this->cacheFile, 'garbage');
+
+        $this->assertNull((new ContainerCache($this->cacheFile, null, false))->load());
     }
 
     public function testExistsReturnsFalseWhenDisabled(): void
@@ -119,61 +270,28 @@ class ContainerCacheTest extends TestCase
         $cache = new ContainerCache($this->cacheFile, null, false);
 
         // Even if file exists, disabled cache returns false
-        file_put_contents($this->cacheFile, '<?php return [];');
+        file_put_contents($this->cacheFile, 'x');
 
         $this->assertFalse($cache->exists());
     }
 
-    // ==================== Non-Existent/Corrupted Files ====================
+    // ==================== Non-Existent Files ====================
 
     public function testLoadNonExistentFileReturnsNull(): void
     {
         $cache = new ContainerCache('/non/existent/file.php', $this->signatureKey);
 
-        $result = $cache->load();
-
-        $this->assertNull($result);
+        $this->assertNull($cache->load());
     }
 
-    public function testLoadCorruptedCacheReturnsNull(): void
+    public function testLoadDirectoryReturnsNull(): void
     {
-        // Write invalid PHP (returns non-array) - but with valid signature format
-        file_put_contents($this->cacheFile, "<?php\n// HMAC-SHA256: " . str_repeat('a', 64) . "\nreturn \"not an array\";");
+        $cache = new ContainerCache(sys_get_temp_dir(), $this->signatureKey);
 
-        $cache = new ContainerCache($this->cacheFile, $this->signatureKey);
-
-        // Will fail signature check, throwing exception
-        $this->expectException(CacheException::class);
-        $cache->load();
+        $this->assertNull($cache->load());
     }
 
     // ==================== Signature Verification ====================
-
-    public function testSaveWithSignatureAddsHmacHeader(): void
-    {
-        $cache = new ContainerCache($this->cacheFile, 'secret-key');
-
-        $data = ['test' => ['class' => 'Test', 'dependencies' => [], 'defaults' => []]];
-        $cache->save($data);
-
-        $content = file_get_contents($this->cacheFile);
-        $this->assertStringContainsString('HMAC-SHA256:', $content);
-    }
-
-    public function testLoadWithValidSignature(): void
-    {
-        $signature = 'my-secret';
-        $cache = new ContainerCache($this->cacheFile, $signature);
-
-        $data = ['Test' => ['class' => 'Test', 'dependencies' => [], 'defaults' => []]];
-        $cache->save($data);
-
-        // Load with same signature
-        $cache2 = new ContainerCache($this->cacheFile, $signature);
-        $loaded = $cache2->load();
-
-        $this->assertEquals($data, $loaded);
-    }
 
     public function testLoadWithInvalidSignatureThrows(): void
     {
@@ -184,20 +302,122 @@ class ContainerCacheTest extends TestCase
         $cache2 = new ContainerCache($this->cacheFile, 'key2');
 
         $this->expectException(CacheException::class);
-        $this->expectExceptionMessage('signature');
+        $this->expectExceptionMessage('Cache file signature is invalid');
 
         $cache2->load();
     }
 
-    public function testLoadWithSignatureButMalformedContentThrows(): void
+    /**
+     * @return array<string, array{callable(string, string): string}> content and injected PHP code in, tampered content out
+     */
+    public static function tamperings(): array
     {
-        // Write file with signature but no return statement
-        file_put_contents($this->cacheFile, "<?php\n// HMAC-SHA256: " . str_repeat('a', 64) . "\necho 'no return';");
+        $payloadStart = strlen("<?php __halt_compiler(); ?>\nHMAC-SHA256: ") + 64 + 1;
 
-        $cache = new ContainerCache($this->cacheFile, 'some-key');
+        return [
+            'payload byte changed' => [static fn (string $c): string => substr($c, 0, -2) . 'X' . substr($c, -1)],
+            'byte appended' => [static fn (string $c): string => $c . ' '],
+            'newline appended' => [static fn (string $c): string => $c . "\n"],
+            'payload truncated' => [static fn (string $c): string => substr($c, 0, -1)],
+            'byte inserted before payload' => [static fn (string $c): string => substr($c, 0, $payloadStart) . ' ' . substr($c, $payloadStart)],
+            'code inserted before payload' => [static fn (string $c, string $code): string => substr($c, 0, $payloadStart) . $code . substr($c, $payloadStart)],
+            'code appended' => [static fn (string $c, string $code): string => $c . $code],
+            'payload removed' => [static fn (string $c): string => substr($c, 0, $payloadStart)],
+            'signature digit changed' => [static fn (string $c): string => substr_replace($c, $c[$payloadStart - 2] === '0' ? '1' : '0', $payloadStart - 2, 1)],
+            'signature in upper case' => [static fn (string $c): string => substr($c, 0, $payloadStart - 65) . strtoupper(substr($c, $payloadStart - 65, 64)) . substr($c, $payloadStart - 1)],
+            'signature line without newline' => [static fn (string $c): string => substr_replace($c, ' ', $payloadStart - 1, 1)],
+            // Same length as the guard line, so the payload offset stays where it was
+            'guard line replaced' => [static fn (string $c): string => '<?php                    ?>' . substr($c, 27)],
+            'guard line replaced by code' => [static fn (string $c, string $code): string => $code . substr($c, strpos($c, "\n"))],
+            'signature label changed' => [static fn (string $c): string => str_replace('HMAC-SHA256: ', 'hmac-sha256: ', $c)],
+            'code before guard line' => [static fn (string $c, string $code): string => $code . $c],
+            'file cut inside signature' => [static fn (string $c): string => substr($c, 0, $payloadStart - 10)],
+            'empty file' => [static fn (string $c): string => ''],
+            'plain php' => [static fn (string $c, string $code): string => $code . "<?php\nreturn ['test' => []];"],
+        ];
+    }
 
-        $this->expectException(CacheException::class);
-        $cache->load();
+    /**
+     * @param callable(string, string): string $tamper
+     */
+    #[DataProvider('tamperings')]
+    public function testLoadThrowsForTamperedFileAndRunsNothing(callable $tamper): void
+    {
+        $marker = $this->cacheFile . '.executed';
+        $cache = new ContainerCache($this->cacheFile, $this->signatureKey);
+        $cache->save(['Test' => ['class' => 'Test', 'dependencies' => [], 'defaults' => ['abc'], 'optional' => []]]);
+        $original = (string) file_get_contents($this->cacheFile);
+        $tampered = $tamper($original, '<?php touch(' . var_export($marker, true) . '); ?>');
+        $this->assertNotSame($original, $tampered);
+        file_put_contents($this->cacheFile, $tampered);
+
+        try {
+            $cache->load();
+            $this->fail('Expected CacheException');
+        } catch (CacheException $e) {
+            $this->assertSame('Cache file signature is invalid', $e->getMessage());
+        }
+
+        $this->assertFileDoesNotExist($marker);
+    }
+
+    public function testSignatureIsBoundToThisLibrary(): void
+    {
+        $payload = serialize(['Test' => []]);
+
+        // Same key, signed without context or for the route cache of sodaho/php-router
+        foreach (['', "sodaho/php-router route-cache v2\n"] as $foreignContext) {
+            file_put_contents($this->cacheFile, $this->signed($payload, null, $foreignContext));
+
+            try {
+                (new ContainerCache($this->cacheFile, $this->signatureKey))->load();
+                $this->fail('Expected CacheException');
+            } catch (CacheException $e) {
+                $this->assertSame('Cache file signature is invalid', $e->getMessage());
+            }
+        }
+
+        file_put_contents($this->cacheFile, $this->signed($payload));
+        $this->assertSame(['Test' => []], (new ContainerCache($this->cacheFile, $this->signatureKey))->load());
+    }
+
+    public function testLoadReturnsNullWhenSignedPayloadIsNotAnArray(): void
+    {
+        file_put_contents($this->cacheFile, $this->signed(serialize('not an array')));
+
+        $this->assertNull((new ContainerCache($this->cacheFile, $this->signatureKey))->load());
+    }
+
+    public function testLoadReturnsNullWhenSignedPayloadIsNotSerializedData(): void
+    {
+        file_put_contents($this->cacheFile, $this->signed('garbage'));
+
+        $this->assertNull((new ContainerCache($this->cacheFile, $this->signatureKey))->load());
+    }
+
+    // ==================== Files Written by 1.0.x ====================
+
+    public function testLegacyFileIsIgnoredAndNeverExecuted(): void
+    {
+        $marker = $this->cacheFile . '.executed';
+        $data = ['Test' => ['class' => 'Test', 'dependencies' => [], 'defaults' => []]];
+        // The 1.0.x signature covered only the export: this file verified there and ran the injected line
+        file_put_contents($this->cacheFile, $this->legacy($data, 'touch(' . var_export($marker, true) . ");\n"));
+
+        $loaded = (new ContainerCache($this->cacheFile, $this->signatureKey))->load();
+
+        $this->assertNull($loaded);
+        $this->assertFileDoesNotExist($marker);
+    }
+
+    public function testLegacyFileIsReplacedOnSave(): void
+    {
+        file_put_contents($this->cacheFile, $this->legacy(['Old' => []]));
+        $cache = new ContainerCache($this->cacheFile, $this->signatureKey);
+
+        $cache->save(['New' => []]);
+
+        $this->assertSame(['New' => []], $cache->load());
     }
 
     // ==================== Clear/Exists ====================
@@ -224,6 +444,22 @@ class ContainerCacheTest extends TestCase
         $this->assertFalse($result);
     }
 
+    public function testClearReturnsFalseWithoutWarningWhenThePathCannotBeDeleted(): void
+    {
+        // unlink() fails on a directory, whoever runs the tests
+        $directory = sys_get_temp_dir() . '/container_cache_dir_' . uniqid();
+        mkdir($directory);
+
+        try {
+            $cache = new ContainerCache($directory, $this->signatureKey);
+
+            $this->assertFalse($cache->clear());
+            $this->assertTrue($cache->exists());
+        } finally {
+            rmdir($directory);
+        }
+    }
+
     public function testExists(): void
     {
         $cache = new ContainerCache($this->cacheFile, $this->signatureKey);
@@ -235,62 +471,11 @@ class ContainerCacheTest extends TestCase
         $this->assertTrue($cache->exists());
     }
 
-    // ==================== Edge Cases ====================
-
-    public function testLoadWithoutHmacHeaderThrows(): void
-    {
-        // Write valid PHP but without HMAC header when signature key is set
-        file_put_contents($this->cacheFile, "<?php\nreturn ['test' => []];");
-
-        $cache = new ContainerCache($this->cacheFile, $this->signatureKey);
-
-        $this->expectException(CacheException::class);
-        $this->expectExceptionMessage('signature');
-
-        $cache->load();
-    }
-
-    public function testLoadReturnsNullWhenRequireReturnsNonArray(): void
-    {
-        // Create a file with valid signature but returns non-array
-        // First, we need to create it with the correct signature
-        $cache = new ContainerCache($this->cacheFile, $this->signatureKey);
-        $cache->save(['test' => ['class' => 'Test', 'dependencies' => [], 'defaults' => []]]);
-
-        // Now manually corrupt the file content but keep the signature line
-        // This simulates a corrupted but loadable file
-        $content = file_get_contents($this->cacheFile);
-        // Replace the return array with return null (keeping signature)
-        $content = preg_replace('/return array \(.*\);/s', 'return null;', $content);
-        file_put_contents($this->cacheFile, $content);
-
-        // Loading should throw because signature won't match
-        $this->expectException(CacheException::class);
-        $cache->load();
-    }
-
-    public function testLoadReturnsNullWhenRequireThrows(): void
-    {
-        // Create file with valid signature that throws when executed
-        // The signature is computed on the part after "return "
-        $throwCode = "(function() { throw new \\Exception('fail'); })()";
-        $signature = hash_hmac('sha256', $throwCode, $this->signatureKey);
-        $content = "<?php\n// HMAC-SHA256: {$signature}\nreturn {$throwCode};";
-        file_put_contents($this->cacheFile, $content);
-
-        $cache = new ContainerCache($this->cacheFile, $this->signatureKey);
-
-        // The catch block returns null
-        $result = $cache->load();
-
-        $this->assertNull($result);
-    }
-
     // ==================== Filesystem Error Tests (vfsStream) ====================
 
     public function testSaveThrowsWhenDirectoryNotCreatable(): void
     {
-        $root = vfsStream::setup('cache', 0o444); // Read-only root
+        vfsStream::setup('cache', 0o444); // Read-only root
         $cacheFile = vfsStream::url('cache/subdir/container.php');
 
         $cache = new ContainerCache($cacheFile, $this->signatureKey);
@@ -298,6 +483,7 @@ class ContainerCacheTest extends TestCase
         $this->expectException(CacheException::class);
         $this->expectExceptionMessage('not writable');
 
+        // No error suppression here: the library must not emit a PHP warning on top of its exception
         $cache->save(['test' => ['class' => 'Test', 'dependencies' => [], 'defaults' => []]]);
     }
 
@@ -305,7 +491,7 @@ class ContainerCacheTest extends TestCase
     {
         $root = vfsStream::setup('cache', 0o755);
         // Create directory but make it read-only after
-        $dir = vfsStream::newDirectory('subdir', 0o444)->at($root);
+        vfsStream::newDirectory('subdir', 0o444)->at($root);
         $cacheFile = vfsStream::url('cache/subdir/container.php');
 
         $cache = new ContainerCache($cacheFile, $this->signatureKey);
@@ -313,28 +499,12 @@ class ContainerCacheTest extends TestCase
         $this->expectException(CacheException::class);
         $this->expectExceptionMessage('Failed to write');
 
-        // Suppress the PHP warning that file_put_contents emits
-        @$cache->save(['test' => ['class' => 'Test', 'dependencies' => [], 'defaults' => []]]);
-    }
-
-    public function testLoadReturnsNullWhenDataIsNotArray(): void
-    {
-        // Create file with valid signature but returns non-array (null)
-        $returnValue = 'null';
-        $signature = hash_hmac('sha256', $returnValue, $this->signatureKey);
-        $content = "<?php\n// HMAC-SHA256: {$signature}\nreturn {$returnValue};";
-        file_put_contents($this->cacheFile, $content);
-
-        $cache = new ContainerCache($this->cacheFile, $this->signatureKey);
-
-        $result = $cache->load();
-
-        $this->assertNull($result);
+        $cache->save(['test' => ['class' => 'Test', 'dependencies' => [], 'defaults' => []]]);
     }
 
     /**
      * Note: Testing rename() failure is not reliably possible with vfsStream.
-     * The rename failure path (line 85-88) is covered by @codeCoverageIgnore
+     * That path is covered by @codeCoverageIgnore
      * as it requires filesystem-level failures that can't be simulated.
      */
 }
