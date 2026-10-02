@@ -14,27 +14,25 @@ class EnvironmentConfigTest extends TestCase
 {
     private string $cacheFile;
 
-    /** @var array<string, string|false> */
+    private const KEYS = ['APP_DEBUG', 'APP_ENV', 'CONTAINER_CACHE_FILE', 'CONTAINER_CACHE_KEY'];
+
+    /** @var array<string, mixed> */
     private array $originalEnv = [];
+
+    /** @var array<string, string|false> */
+    private array $originalProcessEnv = [];
 
     protected function setUp(): void
     {
         $this->cacheFile = sys_get_temp_dir() . '/container_env_test_' . uniqid() . '.php';
 
-        // Backup original env values
-        $this->originalEnv = [
-            'APP_DEBUG' => $_ENV['APP_DEBUG'] ?? false,
-            'APP_ENV' => $_ENV['APP_ENV'] ?? false,
-            'CONTAINER_CACHE_FILE' => $_ENV['CONTAINER_CACHE_FILE'] ?? false,
-            'CONTAINER_CACHE_KEY' => $_ENV['CONTAINER_CACHE_KEY'] ?? false,
-        ];
-
-        // Clear env
-        unset($_ENV['APP_DEBUG'], $_ENV['APP_ENV'], $_ENV['CONTAINER_CACHE_FILE'], $_ENV['CONTAINER_CACHE_KEY']);
-        putenv('APP_DEBUG');
-        putenv('APP_ENV');
-        putenv('CONTAINER_CACHE_FILE');
-        putenv('CONTAINER_CACHE_KEY');
+        // Backup $_ENV and the process environment, then clear both
+        $this->originalEnv = $_ENV;
+        foreach (self::KEYS as $key) {
+            $this->originalProcessEnv[$key] = getenv($key);
+            unset($_ENV[$key]);
+            putenv($key);
+        }
     }
 
     protected function tearDown(): void
@@ -43,14 +41,9 @@ class EnvironmentConfigTest extends TestCase
             unlink($this->cacheFile);
         }
 
-        // Restore original env
-        foreach ($this->originalEnv as $key => $value) {
-            if ($value === false) {
-                unset($_ENV[$key]);
-                putenv($key);
-            } else {
-                $_ENV[$key] = $value;
-            }
+        $_ENV = $this->originalEnv;
+        foreach ($this->originalProcessEnv as $key => $value) {
+            putenv($value === false ? $key : $key . '=' . $value);
         }
     }
 
