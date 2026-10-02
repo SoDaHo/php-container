@@ -597,6 +597,71 @@ class ContainerTest extends TestCase
         $this->assertSame($bound, $container->get(Fixtures\ServiceInterface::class));
     }
 
+    // ==================== has(): Aliases ====================
+
+    public function testHasReturnsFalseForAliasToMissingClass(): void
+    {
+        $container = new Container();
+        $container->bind(Fixtures\ServiceInterface::class, 'Missing\Implementation');
+
+        $this->assertFalse($container->has(Fixtures\ServiceInterface::class));
+
+        $this->expectException(NotFoundException::class);
+        $container->get(Fixtures\ServiceInterface::class);
+    }
+
+    public function testHasFollowsAliasChain(): void
+    {
+        $container = new Container();
+        $container->bind(Fixtures\FirstInterface::class, Fixtures\SecondInterface::class);
+        $this->assertFalse($container->has(Fixtures\FirstInterface::class));
+
+        $container->bind(Fixtures\SecondInterface::class, Fixtures\ConcreteService::class);
+        $this->assertTrue($container->has(Fixtures\FirstInterface::class));
+    }
+
+    public function testHasReturnsTrueForAliasToDefinition(): void
+    {
+        $container = new Container();
+        $container->bind(Fixtures\ServiceInterface::class, 'service.custom');
+        $container->set('service.custom', fn () => new Fixtures\ConcreteService());
+
+        $this->assertTrue($container->has(Fixtures\ServiceInterface::class));
+        $this->assertInstanceOf(Fixtures\ConcreteService::class, $container->get(Fixtures\ServiceInterface::class));
+    }
+
+    public function testHasReturnsFalseForAliasCycle(): void
+    {
+        $container = new Container();
+        $container->bind(Fixtures\ConcreteService::class, Fixtures\AlternativeService::class);
+        $container->bind(Fixtures\AlternativeService::class, Fixtures\ConcreteService::class);
+
+        $this->assertFalse($container->has(Fixtures\ConcreteService::class));
+        $this->assertFalse($container->has(Fixtures\AlternativeService::class));
+    }
+
+    public function testHasReturnsTrueForInstanceBehindAlias(): void
+    {
+        $container = new Container();
+        $container->bind(Fixtures\FirstInterface::class, Fixtures\SecondInterface::class);
+        $container->set(Fixtures\SecondInterface::class, fn () => 'value');
+        $container->get(Fixtures\SecondInterface::class);
+
+        $this->assertTrue($container->has(Fixtures\FirstInterface::class));
+    }
+
+    public function testHasReturnsTrueForEntryThatAlreadyExistsWhateverTheBindingSaysNow(): void
+    {
+        $container = new Container();
+        $container->bind(Fixtures\ServiceInterface::class, Fixtures\ConcreteService::class);
+        $service = $container->get(Fixtures\ServiceInterface::class);
+
+        $container->bind(Fixtures\ServiceInterface::class, 'Missing\Implementation');
+
+        $this->assertTrue($container->has(Fixtures\ServiceInterface::class));
+        $this->assertSame($service, $container->get(Fixtures\ServiceInterface::class));
+    }
+
     // ==================== Cycles Outside of Autowiring ====================
 
     public function testCircularDependencyChainIsExact(): void

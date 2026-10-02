@@ -251,10 +251,19 @@ class Container implements ContainerInterface
      */
     public function has(string $id): bool
     {
-        return array_key_exists($id, $this->instances)
-            || isset($this->definitions[$id])
-            || isset($this->aliases[$id])
-            || (class_exists($id) && (new ReflectionClass($id))->isInstantiable());
+        $seen = [];
+        while (!array_key_exists($id, $this->instances) && !isset($this->definitions[$id])) {
+            if (!isset($this->aliases[$id]) || $this->aliases[$id] === $id) {
+                return class_exists($id) && (new ReflectionClass($id))->isInstantiable();
+            }
+            if (isset($seen[$id])) {
+                return false;
+            }
+            $seen[$id] = true;
+            $id = $this->aliases[$id];
+        }
+
+        return true;
     }
 
     /**
