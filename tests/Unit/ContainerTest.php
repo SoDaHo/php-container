@@ -734,10 +734,14 @@ class ContainerTest extends TestCase
         $container = new Container();
         $container->set('self', fn (Container $c) => $c->get('self'));
 
-        $this->expectException(ContainerException::class);
-        $this->expectExceptionMessage("Error while creating service 'self': Circular dependency detected: self -> self");
-
-        $container->get('self');
+        try {
+            $container->get('self');
+            $this->fail('Expected ContainerException');
+        } catch (ContainerException $e) {
+            $this->assertSame("Error while creating service 'self'.", $e->getMessage());
+            $this->assertInstanceOf(ContainerException::class, $e->getPrevious());
+            $this->assertSame('Circular dependency detected: self -> self', $e->getPrevious()->getMessage());
+        }
     }
 
     public function testFactoriesResolvingEachOtherAreDetected(): void
@@ -746,10 +750,14 @@ class ContainerTest extends TestCase
         $container->set('a', fn (Container $c) => $c->get('b'));
         $container->set('b', fn (Container $c) => $c->get('a'));
 
-        $this->expectException(ContainerException::class);
-        $this->expectExceptionMessage('Circular dependency detected: a -> b -> a');
-
-        $container->get('a');
+        try {
+            $container->get('a');
+            $this->fail('Expected ContainerException');
+        } catch (ContainerException $e) {
+            $this->assertSame("Error while creating service 'a'.", $e->getMessage());
+            $this->assertSame("Error while creating service 'b'.", $e->getPrevious()?->getMessage());
+            $this->assertSame('Circular dependency detected: a -> b -> a', $e->getPrevious()?->getPrevious()?->getMessage());
+        }
     }
 
     public function testCycleThroughBindingIsDetected(): void
@@ -896,9 +904,9 @@ class ContainerTest extends TestCase
             $container->get($id);
             $this->fail('Expected ContainerException');
         } catch (ContainerException $e) {
-            $this->assertSame("Failed to instantiate '$id': Default failed intentionally", $e->getMessage());
+            $this->assertSame("Failed to instantiate '$id'.", $e->getMessage());
             $this->assertInstanceOf(\RuntimeException::class, $e->getPrevious());
-            $this->assertNotNull($e->getDebugMessage());
+            $this->assertStringEndsWith(': Default failed intentionally', (string) $e->getDebugMessage());
         }
 
         $this->assertCount(1, $errors);
@@ -928,7 +936,7 @@ class ContainerTest extends TestCase
         }
 
         $this->assertSame(
-            "Failed to instantiate '" . Fixtures\ServiceThrowsInConstructor::class . "': Constructor failed intentionally",
+            "Failed to instantiate '" . Fixtures\ServiceThrowsInConstructor::class . "'.",
             $messages[0]
         );
         $this->assertSame($messages[0], $messages[1]);
@@ -937,22 +945,72 @@ class ContainerTest extends TestCase
 
     // ==================== Messages ====================
 
-    public function testWrappedExceptionsCarryTheOriginInTheDebugMessage(): void
+    public function testMessageOfAWrappedExceptionStaysOutOfGetMessage(): void
     {
         $container = new Container();
-        $container->set('broken', fn () => throw new \LogicException('Oops'));
+        $container->set('broken', fn () => throw new \LogicException('mysql://app:secret@db/app refused'));
+        $messages = [
+            'broken' => "Error while creating service 'broken'.",
+            Fixtures\ServiceThrowsInConstructor::class => "Failed to instantiate '" . Fixtures\ServiceThrowsInConstructor::class . "'.",
+        ];
 
-        foreach (['broken', Fixtures\ServiceThrowsInConstructor::class] as $id) {
+        foreach ($messages as $id => $message) {
             try {
                 $container->get($id);
                 $this->fail('Expected ContainerException');
             } catch (ContainerException $e) {
                 $previous = $e->getPrevious();
                 $this->assertNotNull($previous);
+                $this->assertSame($message, $e->getMessage());
                 $this->assertSame(
-                    $previous::class . ' in ' . $previous->getFile() . ':' . $previous->getLine(),
+                    $previous::class . ' in ' . $previous->getFile() . ':' . $previous->getLine() . ': ' . $previous->getMessage(),
                     $e->getDebugMessage()
                 );
+            }
+        }
+    }
+
+    public function testDebugMessageNamesEveryCauseInOrder(): void
+    {
+        $container = new Container();
+        $container->set('outer', fn (Container $c) => $c->get('inner'));
+        $container->set('inner', fn () => throw new \RuntimeException('Oops', 0, new \LogicException('Root cause')));
+
+        try {
+            $container->get('outer');
+            $this->fail('Expected ContainerException');
+        } catch (ContainerException $e) {
+            $inner = $e->getPrevious();
+            $this->assertInstanceOf(ContainerException::class, $inner);
+            $thrown = $inner->getPrevious();
+            $this->assertInstanceOf(\RuntimeException::class, $thrown);
+            $root = $thrown->getPrevious();
+            $this->assertInstanceOf(\LogicException::class, $root);
+
+            $this->assertSame(
+                ContainerException::class . ' in ' . $inner->getFile() . ':' . $inner->getLine() . ": Error while creating service 'inner'."
+                . ' <- RuntimeException in ' . $thrown->getFile() . ':' . $thrown->getLine() . ': Oops'
+                . ' <- LogicException in ' . $root->getFile() . ':' . $root->getLine() . ': Root cause',
+                $e->getDebugMessage()
+            );
+            $this->assertSame(
+                'RuntimeException in ' . $thrown->getFile() . ':' . $thrown->getLine() . ': Oops'
+                . ' <- LogicException in ' . $root->getFile() . ':' . $root->getLine() . ': Root cause',
+                $inner->getDebugMessage()
+            );
+        }
+    }
+
+    public function testExceptionsTheContainerRaisesItselfHaveNoDebugMessage(): void
+    {
+        $container = new Container();
+
+        foreach (['Missing\Service', Fixtures\AbstractService::class, Fixtures\CircularA::class, Fixtures\ControllerWithInterface::class] as $id) {
+            try {
+                $container->get($id);
+                $this->fail('Expected ContainerException');
+            } catch (ContainerException $e) {
+                $this->assertNull($e->getDebugMessage());
             }
         }
     }
@@ -1074,7 +1132,7 @@ class ContainerTest extends TestCase
             $container->get('outer');
             $this->fail('Expected ContainerException');
         } catch (ContainerException $e) {
-            $this->assertSame("Error while creating service 'outer': Error while creating service 'inner': Oops", $e->getMessage());
+            $this->assertSame("Error while creating service 'outer'.", $e->getMessage());
         }
 
         $this->assertSame(['inner', 'outer'], $ids);

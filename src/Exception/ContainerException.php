@@ -10,8 +10,8 @@ use Psr\Container\ContainerExceptionInterface;
 /**
  * Base exception for all container errors.
  *
- * Provides a message and, where there is one, a debug message with a hint for logging.
- * getMessage() can contain the message of a wrapped exception: log it, don't show it to end users.
+ * getMessage() names ids, classes and parameters only. What a wrapped exception says (it may quote
+ * a DSN or a path) is in getDebugMessage() and getPrevious().
  */
 class ContainerException extends Exception implements ContainerExceptionInterface
 {

@@ -226,9 +226,18 @@ class Container implements ContainerInterface
         }
     }
 
+    /**
+     * What a wrapped exception and the ones behind it say, and where they come from. For the debug
+     * message only: their text can contain values (a DSN, a path) that getMessage() must not carry.
+     */
     private static function describe(\Throwable $e): string
     {
-        return sprintf('%s in %s:%d', $e::class, $e->getFile(), $e->getLine());
+        $chain = [];
+        for ($cause = $e; $cause !== null; $cause = $cause->getPrevious()) {
+            $chain[] = sprintf('%s in %s:%d: %s', $cause::class, $cause->getFile(), $cause->getLine(), $cause->getMessage());
+        }
+
+        return implode(' <- ', $chain);
     }
 
     private function runFactory(string $id, callable $factory): mixed
@@ -238,7 +247,7 @@ class Container implements ContainerInterface
         } catch (\Throwable $e) {
             $this->report($id, $e);
             throw new ContainerException(
-                "Error while creating service '$id': " . $e->getMessage(),
+                "Error while creating service '$id'.",
                 0,
                 $e,
                 self::describe($e)
@@ -351,7 +360,7 @@ class Container implements ContainerInterface
         $this->report($id, $e);
 
         return new ContainerException(
-            "Failed to instantiate '$id': " . $e->getMessage(),
+            "Failed to instantiate '$id'.",
             0,
             $e,
             self::describe($e)
