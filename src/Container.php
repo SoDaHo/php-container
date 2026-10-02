@@ -55,7 +55,10 @@ class Container implements ContainerInterface
      *
      * Config precedence: $config > $_ENV > getenv() > default
      *
-     * @param array{debug?: bool, cacheFile?: string, cacheSignature?: string} $config
+     * 'cacheFile' is taken literally when present: null (or '') disables caching
+     * regardless of the environment.
+     *
+     * @param array{debug?: bool, cacheFile?: string|null, cacheSignature?: string|null} $config
      */
     public function __construct(array $config = [])
     {
@@ -67,10 +70,39 @@ class Container implements ContainerInterface
                 ?: in_array(self::env('APP_ENV') ?? '', ['local', 'dev', 'development'], true);
         }
 
-        $this->cacheFile = $config['cacheFile'] ?? self::env('CONTAINER_CACHE_FILE');
-        $this->cacheSignature = $config['cacheSignature'] ?? self::env('CONTAINER_CACHE_KEY');
+        $this->cacheFile = array_key_exists('cacheFile', $config)
+            ? self::blankToNull($config['cacheFile'])
+            : self::cacheEnv('CONTAINER_CACHE_FILE');
+        // The key keeps its fallback: there is nothing to switch off with it, and a null from
+        // the caller ($_ENV['...'] ?? null) used to mean "take it from the environment"
+        $this->cacheSignature = self::blankToNull($config['cacheSignature'] ?? null)
+            ?? self::cacheEnv('CONTAINER_CACHE_KEY');
 
         $this->rebuildCache();
+    }
+
+    /**
+     * An empty value means "not set".
+     */
+    private static function blankToNull(?string $value): ?string
+    {
+        return $value === '' ? null : $value;
+    }
+
+    /**
+     * Cache setting from the environment ($_ENV > getenv()); an empty one (KEY= in a .env file) is skipped.
+     */
+    private static function cacheEnv(string $key): ?string
+    {
+        $value = $_ENV[$key] ?? null;
+        if (is_string($value) && $value !== '') {
+            return $value;
+        }
+
+        // Only asked when $_ENV has nothing, as before
+        $value = getenv($key);
+
+        return $value === false ? null : self::blankToNull($value);
     }
 
     /**
@@ -92,7 +124,7 @@ class Container implements ContainerInterface
     /**
      * Factory method for fluent creation.
      *
-     * @param array{debug?: bool, cacheFile?: string, cacheSignature?: string} $config
+     * @param array{debug?: bool, cacheFile?: string|null, cacheSignature?: string|null} $config
      */
     public static function create(array $config = []): self
     {
@@ -103,13 +135,27 @@ class Container implements ContainerInterface
      * Enable caching (fluent API).
      *
      * @param string $file Path to cache file
-     * @param string|null $signature HMAC key for integrity verification (required in production)
+     * @param string|null $signature HMAC key for integrity verification (required in production);
+     *                               null keeps the key that is already configured
      */
     public function enableCache(string $file, ?string $signature = null): self
     {
-        $this->cacheFile = $file;
-        $this->cacheSignature = $signature;
+        $this->cacheFile = self::blankToNull($file);
+        $this->cacheSignature = self::blankToNull($signature) ?? $this->cacheSignature;
         $this->cacheLoaded = false;
+        $this->rebuildCache();
+        return $this;
+    }
+
+    /**
+     * Disable caching (fluent API). Nothing is read from or written to a cache file afterwards.
+     */
+    public function disableCache(): self
+    {
+        $this->cacheFile = null;
+        $this->resolvedMeta = [];
+        $this->cacheLoaded = false;
+        $this->cacheDirty = false;
         $this->rebuildCache();
         return $this;
     }

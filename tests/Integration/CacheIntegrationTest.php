@@ -600,6 +600,23 @@ class CacheIntegrationTest extends TestCase
         $this->assertSame([], (new ContainerCache($this->cacheFile, $this->signatureKey))->load());
     }
 
+    // ==================== enableCache() After First Use ====================
+
+    public function testDisableCacheStopsUsingWhatWasLoaded(): void
+    {
+        // Outdated for TestController; loaded by the first get()
+        (new ContainerCache($this->cacheFile, $this->signatureKey))->save([
+            Fixtures\TestService::class => ['class' => Fixtures\TestService::class, 'dependencies' => [], 'defaults' => [], 'optional' => []],
+            Fixtures\TestController::class => ['class' => Fixtures\TestController::class, 'dependencies' => [], 'defaults' => [], 'optional' => []],
+        ]);
+        $container = $this->container();
+        $container->get(Fixtures\TestService::class);
+
+        $container->disableCache();
+
+        $this->assertInstanceOf(Fixtures\TestService::class, $container->get(Fixtures\TestController::class)->service);
+    }
+
     // ==================== Concurrent First Requests ====================
 
     public function testConcurrentFirstRequestsLeaveAValidCacheAndEmitNoWarnings(): void
