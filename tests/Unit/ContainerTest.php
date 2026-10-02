@@ -149,6 +149,46 @@ class ContainerTest extends TestCase
         $this->assertInstanceOf(Container::class, $container);
     }
 
+    /**
+     * @return array<string, array{array<mixed>}>
+     */
+    public static function leftoverConfigs(): array
+    {
+        return [
+            'debug' => [['debug' => false]],
+            'cache' => [['cacheFile' => '/tmp/container.cache', 'cacheSignature' => 'key']],
+            'null value' => [['cacheFile' => null]],
+            'unknown key' => [['anything' => 1]],
+            'list' => [[true]],
+        ];
+    }
+
+    /**
+     * @param array<mixed> $config
+     */
+    #[DataProvider('leftoverConfigs')]
+    public function testConstructorRejectsConfigLeftOverFromVersionOne(array $config): void
+    {
+        $this->expectException(ContainerException::class);
+        $this->expectExceptionMessage('The container has no options: the cache and the debug option were removed in 2.0.');
+
+        new Container($config);
+    }
+
+    public function testCreateRejectsConfigLeftOverFromVersionOne(): void
+    {
+        $this->expectException(ContainerException::class);
+        $this->expectExceptionMessage('The container has no options');
+
+        Container::create(['debug' => true]);
+    }
+
+    public function testEmptyConfigIsAccepted(): void
+    {
+        $this->assertInstanceOf(Container::class, new Container([]));
+        $this->assertInstanceOf(Container::class, Container::create([]));
+    }
+
     public function testContainerDoesNotReadTheEnvironment(): void
     {
         $source = (string) file_get_contents((string) new \ReflectionClass(Container::class)->getFileName());
@@ -1207,6 +1247,16 @@ class ContainerTest extends TestCase
         } catch (\RuntimeException $e) {
             $this->assertSame($thrown, $e);
         }
+    }
+
+    public function testSubclassThatProvidesEntriesItselfIsAskedForDependencies(): void
+    {
+        $container = new Fixtures\ContainerWithFallback(new Fixtures\ConcreteService());
+
+        $this->assertInstanceOf(
+            Fixtures\ConcreteService::class,
+            $container->get(Fixtures\ControllerWithInterface::class)->service
+        );
     }
 
     public function testErrorHookIsCalledAgainAfterItThrew(): void

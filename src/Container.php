@@ -38,11 +38,32 @@ class Container implements ContainerInterface
     private bool $reportingError = false;
 
     /**
-     * Factory method for fluent creation.
+     * Create a new Container instance. The environment is not read.
+     *
+     * @param array{} $config There are no options; the parameter only rejects the config array 1.x took
+     *
+     * @throws ContainerException If an option is passed: it would have no effect
      */
-    public static function create(): self
+    public function __construct(array $config = [])
     {
-        return new self();
+        // @phpstan-ignore notIdentical.alwaysFalse (for callers without static analysis)
+        if ($config !== []) {
+            throw new ContainerException(
+                'The container has no options: the cache and the debug option were removed in 2.0.'
+            );
+        }
+    }
+
+    /**
+     * Factory method for fluent creation.
+     *
+     * @param array{} $config There are no options
+     *
+     * @throws ContainerException If an option is passed
+     */
+    public static function create(array $config = []): self
+    {
+        return new self($config);
     }
 
     /**
