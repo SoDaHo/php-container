@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-02
+
+### Upgrading
+
+Only if you use the cache:
+
+- Delete the cache file when you update. A file written by 1.0.x is never executed again: it counts as a miss and `saveCache()` replaces it, which throws a `CacheException` if the directory is read-only. 1.0.x cannot read the new format, so delete the file before rolling back as well, and do not let both versions share one file.
+- The cache file holds data only: `null`, scalars, enum cases and arrays of those. `ContainerCache::save()` throws for other objects, and a class with such an object as default of a parameter whose type is not a single class or interface is no longer cached.
+
 ### Security
 
 - The cache file is no longer executed. It is a signed data file now; the HMAC covers every byte that is used. Previously, code placed between the signature line and `return` passed verification and was run. Cache files written by earlier versions are ignored and rewritten.
@@ -14,13 +23,12 @@
 
 ### Changed
 
-- Upgrading with an existing cache file: the 1.0 file counts as a miss and `saveCache()` replaces it, so its directory has to be writable, or the file deleted beforehand. 1.0.x cannot read the new format: delete the file before rolling back, and do not let both versions share one file.
 - `'cacheFile' => null` in the config disables caching and is no longer replaced by `CONTAINER_CACHE_FILE`.
 - The `error` hook also fires for failures the container detects itself (entry not found, class not instantiable, unresolvable parameter, circular dependency, invalid cache signature), whether or not the caller catches them. While an `error` hook runs, further failures are not reported to any `error` hook.
 - `has()` follows bindings and returns `false` when the bound class does not exist or is not instantiable, or when the bindings form a cycle.
 - An exception thrown by a `resolve` hook is no longer reported as a failed instantiation.
 - `get()` returns the requested class for PHPStan when called with a class name. A type check on the result is then reported as always true.
-- `ContainerCache` stores `null`, scalars, enum cases and arrays of those; `save()` throws for other objects. Entries written by the container have an additional `optional` key; a default missing from an entry is read from the class instead of being passed as `null`. A class with such an object as default of a parameter whose type is not a single class or interface is no longer cached.
+- Cache entries written by the container have an additional `optional` key; a default missing from an entry is read from the class instead of being passed as `null`.
 
 ### Fixed
 
