@@ -623,6 +623,28 @@ class ContainerTest extends TestCase
         $container->get(Fixtures\ServiceWithNullableNoDefault::class);
     }
 
+    // ==================== Failures: Same Result Every Time ====================
+
+    public function testWrappedExceptionsCarryTheOriginInTheDebugMessage(): void
+    {
+        $container = new Container();
+        $container->set('broken', fn () => throw new \LogicException('Oops'));
+
+        foreach (['broken', Fixtures\ServiceThrowsInConstructor::class] as $id) {
+            try {
+                $container->get($id);
+                $this->fail('Expected ContainerException');
+            } catch (ContainerException $e) {
+                $previous = $e->getPrevious();
+                $this->assertNotNull($previous);
+                $this->assertSame(
+                    $previous::class . ' in ' . $previous->getFile() . ':' . $previous->getLine(),
+                    $e->getDebugMessage()
+                );
+            }
+        }
+    }
+
     // ==================== Hooks: error ====================
 
     public function testErrorHookReportsEachFactoryOnTheWayUp(): void

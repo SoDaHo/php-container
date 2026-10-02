@@ -180,7 +180,12 @@ class Container implements ContainerInterface
                 return $instance;
             } catch (\Throwable $e) {
                 $this->trigger('error', ['id' => $id, 'exception' => $e]);
-                throw new ContainerException("Error while creating service '$id': " . $e->getMessage(), 0, $e);
+                throw new ContainerException(
+                    "Error while creating service '$id': " . $e->getMessage(),
+                    0,
+                    $e,
+                    self::describe($e)
+                );
             }
         }
 
@@ -256,6 +261,11 @@ class Container implements ContainerInterface
         if ($data !== null) {
             $this->resolvedMeta = $data;
         }
+    }
+
+    private static function describe(\Throwable $e): string
+    {
+        return sprintf('%s in %s:%d', $e::class, $e->getFile(), $e->getLine());
     }
 
     private function resolve(string $id): object
@@ -371,7 +381,12 @@ class Container implements ContainerInterface
             return $instance;
         } catch (\Throwable $e) {
             $this->trigger('error', ['id' => $id, 'exception' => $e]);
-            throw new ContainerException("Failed to instantiate '$id': " . $e->getMessage(), 0, $e);
+            throw new ContainerException(
+                "Failed to instantiate '$id': " . $e->getMessage(),
+                0,
+                $e,
+                self::describe($e)
+            );
         }
     }
 
