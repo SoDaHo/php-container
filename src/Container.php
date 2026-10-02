@@ -6,11 +6,10 @@ namespace Sodaho\Container;
 
 use Psr\Container\ContainerInterface;
 use ReflectionClass;
-use ReflectionIntersectionType;
 use ReflectionNamedType;
 use ReflectionParameter;
-use ReflectionUnionType;
 use Sodaho\Container\Cache\ContainerCache;
+use Sodaho\Container\Exception\CacheException;
 use Sodaho\Container\Exception\ContainerException;
 use Sodaho\Container\Exception\NotFoundException;
 use Sodaho\Container\Traits\HasHooks;
@@ -19,10 +18,12 @@ use Sodaho\Container\Traits\HasHooks;
  * Lightweight PSR-11 container with autowiring and optional caching.
  *
  * Hooks:
- * - 'resolve': Triggered when a new instance is created. Data: ['id' => string, 'instance' => object]
- * - 'error': Triggered on exceptions. Data: ['id' => string, 'exception' => Throwable]
+ * - 'resolve': Triggered when a new entry is created. Data: ['id' => string, 'instance' => mixed]
+ * - 'error': Triggered when get() fails. Data: ['id' => string, 'exception' => Throwable]
  * - 'cacheHit': Triggered when class metadata is found in cache. Data: ['id' => string]
  * - 'cacheMiss': Triggered when class metadata is not in cache. Data: ['id' => string]
+ *
+ * @phpstan-import-type ClassMeta from ContainerCache
  */
 class Container implements ContainerInterface
 {
@@ -31,14 +32,17 @@ class Container implements ContainerInterface
     /** @var array<string, callable> */
     private array $definitions = [];
 
-    /** @var array<string, class-string> Interface -> Implementation mappings */
+    /** @var array<string, string> Interface -> Implementation mappings */
     private array $aliases = [];
 
     /** @var array<string, mixed> */
     private array $instances = [];
 
-    /** @var array<string, array{class: class-string, dependencies: array<int, string|null>, defaults: array<int, mixed>}> */
-    private array $resolvedMeta = [];
+    /** @var array<string, ClassMeta> Constructor signatures this container found by Reflection */
+    private array $analyzedMeta = [];
+
+    /** @var array<string, ClassMeta> Constructor signatures read from the cache file */
+    private array $loadedMeta = [];
 
     private ?ContainerCache $cache = null;
     private ?string $cacheFile = null;
@@ -49,6 +53,8 @@ class Container implements ContainerInterface
 
     /** @var array<string, true> Entries currently being created (for circular dependency detection) */
     private array $resolving = [];
+
+    private bool $reportingError = false;
 
     /**
      * Create a new Container instance.
@@ -142,6 +148,8 @@ class Container implements ContainerInterface
     {
         $this->cacheFile = self::blankToNull($file);
         $this->cacheSignature = self::blankToNull($signature) ?? $this->cacheSignature;
+        // What was read from the previous file does not carry over; what this container analyzed does
+        $this->loadedMeta = [];
         $this->cacheLoaded = false;
         $this->rebuildCache();
         return $this;
@@ -153,7 +161,7 @@ class Container implements ContainerInterface
     public function disableCache(): self
     {
         $this->cacheFile = null;
-        $this->resolvedMeta = [];
+        $this->loadedMeta = [];
         $this->cacheLoaded = false;
         $this->cacheDirty = false;
         $this->rebuildCache();
@@ -168,6 +176,7 @@ class Container implements ContainerInterface
     public function setDebug(bool $debug): self
     {
         $this->debug = $debug;
+        $this->loadedMeta = [];
         $this->cacheLoaded = false;
         $this->cacheDirty = false;
         $this->rebuildCache();
@@ -231,7 +240,7 @@ class Container implements ContainerInterface
 
             // 3. Alias: Resolve to implementation (bind() mappings)
             if (isset($aliases[$target])) {
-                throw $this->circular([...array_keys($aliases), $target]);
+                throw $this->fail($id, $this->circular([...array_keys($aliases), $target]));
             }
             $aliases[$target] = true;
             $target = $this->aliases[$target];
@@ -242,6 +251,41 @@ class Container implements ContainerInterface
         }
 
         return $instance;
+    }
+
+    /**
+     * Create the entry for an id that is not an alias: run its factory or autowire it.
+     *
+     * @param list<string> $via Aliases that led here (for the circular dependency message)
+     */
+    private function make(string $id, array $via): mixed
+    {
+        if (isset($this->resolving[$id])) {
+            throw $this->fail($id, $this->circular([...$via, $id]));
+        }
+
+        $this->resolving[$id] = true;
+        try {
+            $instance = isset($this->definitions[$id])
+                ? $this->runFactory($id, $this->definitions[$id])
+                : $this->resolve($id);
+        } finally {
+            unset($this->resolving[$id]);
+        }
+
+        $this->instances[$id] = $instance;
+        $this->trigger('resolve', ['id' => $id, 'instance' => $instance]);
+        return $instance;
+    }
+
+    /**
+     * @param list<string> $tail Ids after the entries that are already being created
+     */
+    private function circular(array $tail): ContainerException
+    {
+        return new ContainerException(
+            'Circular dependency detected: ' . implode(' -> ', [...array_keys($this->resolving), ...$tail])
+        );
     }
 
     /**
@@ -267,12 +311,14 @@ class Container implements ContainerInterface
     /**
      * Save cache to disk (call at end of bootstrap/request).
      *
-     * Only writes if new classes were resolved during this request.
+     * Only writes if new classes were resolved during this request or a file from 1.0.x has to be replaced.
+     *
+     * @throws CacheException If the file cannot be written
      */
     public function saveCache(): void
     {
         if ($this->cache !== null && $this->cacheDirty && !$this->debug) {
-            $this->cache->save($this->resolvedMeta);
+            $this->cache->save($this->analyzedMeta + $this->loadedMeta);
             $this->cacheDirty = false;
         }
     }
@@ -280,11 +326,12 @@ class Container implements ContainerInterface
     /**
      * Clear the cache.
      *
-     * @return bool True if cleared
+     * @return bool True if a file was deleted
      */
     public function clearCache(): bool
     {
-        $this->resolvedMeta = [];
+        $this->analyzedMeta = [];
+        $this->loadedMeta = [];
         $this->cacheLoaded = false;
         $this->cacheDirty = false;
         return $this->cache?->clear() ?? false;
@@ -312,7 +359,7 @@ class Container implements ContainerInterface
         $data = $this->cache->load();
 
         if ($data !== null) {
-            $this->resolvedMeta = $data;
+            $this->loadedMeta = $data;
         } elseif ($this->cache->exists()) {
             // A file that cannot be used (written by 1.0.x) is replaced by the next saveCache()
             $this->cacheDirty = true;
@@ -320,38 +367,36 @@ class Container implements ContainerInterface
     }
 
     /**
-     * Create the entry for an id that is not an alias: run its factory or autowire it.
+     * Report a failure to the 'error' hook; returns the exception for the caller to throw.
      *
-     * @param list<string> $via Aliases that led here (for the circular dependency message)
+     * @template E of ContainerException
+     *
+     * @param E $exception
+     *
+     * @return E
      */
-    private function make(string $id, array $via): mixed
+    private function fail(string $id, ContainerException $exception): ContainerException
     {
-        if (isset($this->resolving[$id])) {
-            throw $this->circular([...$via, $id]);
-        }
-
-        $this->resolving[$id] = true;
-        try {
-            $instance = isset($this->definitions[$id])
-                ? $this->runFactory($id, $this->definitions[$id])
-                : $this->resolve($id);
-        } finally {
-            unset($this->resolving[$id]);
-        }
-
-        $this->instances[$id] = $instance;
-        $this->trigger('resolve', ['id' => $id, 'instance' => $instance]);
-        return $instance;
+        $this->report($id, $exception);
+        return $exception;
     }
 
     /**
-     * @param list<string> $tail Ids after the entries that are already being created
+     * Fire the 'error' hook. A hook that uses the container and fails there is not called
+     * again for that failure: it would call itself until the stack is exhausted.
      */
-    private function circular(array $tail): ContainerException
+    private function report(string $id, \Throwable $exception): void
     {
-        return new ContainerException(
-            'Circular dependency detected: ' . implode(' -> ', [...array_keys($this->resolving), ...$tail])
-        );
+        if ($this->reportingError) {
+            return;
+        }
+
+        $this->reportingError = true;
+        try {
+            $this->trigger('error', ['id' => $id, 'exception' => $exception]);
+        } finally {
+            $this->reportingError = false;
+        }
     }
 
     private static function describe(\Throwable $e): string
@@ -364,7 +409,7 @@ class Container implements ContainerInterface
         try {
             return $factory($this);
         } catch (\Throwable $e) {
-            $this->trigger('error', ['id' => $id, 'exception' => $e]);
+            $this->report($id, $e);
             throw new ContainerException(
                 "Error while creating service '$id': " . $e->getMessage(),
                 0,
@@ -377,155 +422,197 @@ class Container implements ContainerInterface
     private function resolve(string $id): object
     {
         if (!class_exists($id)) {
-            throw new NotFoundException("Class or service '$id' not found.");
+            throw $this->fail($id, new NotFoundException("Class or service '$id' not found."));
         }
 
-        /** @var class-string $id */
+        try {
+            $this->loadCache();
+        } catch (ContainerException $e) {
+            throw $this->fail($id, $e);
+        }
 
-        // Try cache first
-        $this->loadCache();
+        // What this container analyzed itself is current; the file may predate a code change
+        $meta = $this->analyzedMeta[$id] ?? $this->loadedMeta[$id] ?? null;
 
-        if (isset($this->resolvedMeta[$id])) {
+        if ($meta !== null) {
             if ($this->cache !== null) {
                 $this->trigger('cacheHit', ['id' => $id]);
             }
-            return $this->buildFromCache($id);
+
+            return $this->build($id, $meta);
         }
 
         if ($this->cache !== null) {
             $this->trigger('cacheMiss', ['id' => $id]);
         }
+        [$meta, $parameters] = $this->analyze($id);
 
-        return $this->resolveWithReflection($id);
+        return $this->build($id, $meta, $parameters);
     }
 
-    /** @param class-string $id */
-    private function buildFromCache(string $id): object
-    {
-        $meta = $this->resolvedMeta[$id];
-        $dependencies = [];
-
-        foreach ($meta['dependencies'] as $index => $depId) {
-            if ($depId === null) {
-                // Use cached default value
-                $dependencies[] = $meta['defaults'][$index] ?? null;
-            } else {
-                $dependencies[] = $this->get($depId);
-            }
-        }
-
-        return new $meta['class'](...$dependencies);
-    }
-
-    /** @param class-string $id */
-    private function resolveWithReflection(string $id): object
+    /**
+     * Read the constructor signature. Decides nothing about wiring: the same metadata is valid
+     * for every container configuration, which is what makes it cacheable.
+     *
+     * @param class-string $id
+     *
+     * @return array{ClassMeta, list<ReflectionParameter>} The metadata (default values are added by build()) and the parameters
+     */
+    private function analyze(string $id): array
     {
         $reflector = new ReflectionClass($id);
 
         if (!$reflector->isInstantiable()) {
-            throw new ContainerException("Class '$id' is not instantiable (abstract or interface).");
+            throw $this->fail($id, new ContainerException("Class '$id' is not instantiable (abstract or interface)."));
         }
 
-        $constructor = $reflector->getConstructor();
+        $meta = ['class' => $id, 'dependencies' => [], 'defaults' => [], 'optional' => []];
 
-        // No constructor? Simple instantiation.
-        if ($constructor === null) {
-            $this->resolvedMeta[$id] = [
-                'class' => $id,
-                'dependencies' => [],
-                'defaults' => [],
-            ];
-            $this->cacheDirty = true;
+        $parameters = $reflector->getConstructor()?->getParameters() ?? [];
 
-            return new $id();
-        }
+        foreach ($parameters as $index => $param) {
+            // Variadic parameters (...$args) are not supported for autowiring
+            if ($param->isVariadic()) {
+                throw $this->fail($id, new ContainerException(
+                    "Cannot resolve variadic parameter '...{$param->getName()}' in class '$id'. Use set() to define this service manually."
+                ));
+            }
 
-        // Resolve dependencies and build metadata
-        $dependencies = [];
-        $depIds = [];
-        $defaults = [];
+            $type = $param->getType();
 
-        foreach ($constructor->getParameters() as $index => $param) {
-            $resolved = $this->resolveParameter($param, $id);
-            $dependencies[] = $resolved['value'];
-            $depIds[] = $resolved['depId'];
-            if ($resolved['depId'] === null) {
-                $defaults[$index] = $resolved['value'];
+            // No type hint, Union Types or Intersection Types (not supported for simplicity)
+            if (!$type instanceof ReflectionNamedType) {
+                if (!$param->isDefaultValueAvailable()) {
+                    throw $this->fail($id, new ContainerException(
+                        "Cannot resolve parameter '{$param->getName()}' in class '$id'. No type hint, union type, or intersection type. Use set() to define this service manually."
+                    ));
+                }
+                $meta['dependencies'][$index] = null;
+                continue;
+            }
+
+            // Primitives (int, string, bool) cannot be autowired unless default value exists
+            if ($type->isBuiltin()) {
+                if (!$param->isDefaultValueAvailable()) {
+                    throw $this->fail($id, new ContainerException(
+                        "Cannot resolve primitive parameter '{$param->getName()}' (type: {$type->getName()}) in class '$id'. Use set() to define this service manually."
+                    ));
+                }
+                $meta['dependencies'][$index] = null;
+                continue;
+            }
+
+            // It's a class/interface dependency
+            $meta['dependencies'][$index] = $type->getName();
+            if ($param->isOptional()) {
+                $meta['optional'][$index] = true;
             }
         }
 
-        // Cache the resolution metadata, unless a default is an object the data file cannot hold
-        $meta = [
-            'class' => $id,
-            'dependencies' => $depIds,
-            'defaults' => $defaults,
-        ];
-        if (ContainerCache::isCacheable($meta)) {
-            $this->resolvedMeta[$id] = $meta;
+        return [$meta, $parameters];
+    }
+
+    /**
+     * Wire the dependencies and create the instance. Cold and warm resolution both end here.
+     *
+     * Defaults are evaluated here, in parameter order and only if they are used: a default can be
+     * an object (new in initializer) whose constructor relies on what was created before it.
+     *
+     * @param class-string $id
+     * @param ClassMeta $meta
+     * @param list<ReflectionParameter>|null $parameters Set if the metadata was just analyzed and is not stored yet
+     */
+    private function build(string $id, array $meta, ?array $parameters = null): object
+    {
+        $fresh = $parameters !== null;
+        $arguments = [];
+        // Metadata saved through ContainerCache directly may come without the key (1.0.x did not need it)
+        $meta += ['defaults' => []];
+
+        foreach ($meta['dependencies'] as $index => $depId) {
+            // No class dependency: the default, from the metadata if it is already known
+            if ($depId === null) {
+                if (!array_key_exists($index, $meta['defaults'])) {
+                    $meta['defaults'][$index] = $this->defaultValue($id, $meta['class'], $index, $parameters);
+                }
+                $arguments[] = $meta['defaults'][$index];
+                continue;
+            }
+
+            // An optional dependency the container cannot provide: its default
+            if (isset($meta['optional'][$index]) && !$this->has($depId)) {
+                $arguments[] = $this->defaultValue($id, $meta['class'], $index, $parameters);
+                continue;
+            }
+
+            try {
+                $arguments[] = $this->get($depId);
+            } catch (NotFoundException $e) {
+                $parameters ??= self::parameters($meta['class']);
+                $name = isset($parameters[$index]) ? $parameters[$index]->getName() : "#$index";
+                throw new ContainerException(
+                    "Cannot resolve dependency '{$depId}' for parameter '{$name}' in class '$id'.",
+                    0,
+                    $e
+                );
+            }
+        }
+
+        // Remember the signature, unless a default is an object the data file cannot hold
+        if ($fresh && ContainerCache::isCacheable($meta['defaults'])) {
+            $this->analyzedMeta[$id] = $meta;
             $this->cacheDirty = true;
         }
 
         try {
-            return $reflector->newInstanceArgs($dependencies);
+            return new $meta['class'](...$arguments);
         } catch (\Throwable $e) {
-            $this->trigger('error', ['id' => $id, 'exception' => $e]);
-            throw new ContainerException(
-                "Failed to instantiate '$id': " . $e->getMessage(),
-                0,
-                $e,
-                self::describe($e)
-            );
+            throw $this->instantiationFailed($id, $e);
         }
     }
 
-    /** @return array{value: mixed, depId: string|null} */
-    private function resolveParameter(ReflectionParameter $param, string $classId): array
+    /**
+     * Evaluate the default of a constructor parameter. It can run code, so it can fail like a constructor.
+     *
+     * @param class-string $class
+     * @param list<ReflectionParameter>|null $parameters Looked up here if not known yet
+     *
+     * @param-out list<ReflectionParameter> $parameters
+     */
+    private function defaultValue(string $id, string $class, int $index, ?array &$parameters): mixed
     {
-        // Variadic parameters (...$args) are not supported for autowiring
-        if ($param->isVariadic()) {
-            throw new ContainerException(
-                "Cannot resolve variadic parameter '...{$param->getName()}' in class '$classId'. Use set() to define this service manually."
-            );
+        $parameters ??= self::parameters($class);
+
+        if (!isset($parameters[$index]) || !$parameters[$index]->isDefaultValueAvailable()) {
+            throw $this->fail($id, new ContainerException(
+                "Cannot resolve parameter #$index in class '$id': the cached metadata is outdated. Clear the cache."
+            ));
         }
 
-        $type = $param->getType();
-
-        // No type hint, Union Types or Intersection Types (not supported for simplicity)
-        if (!$type || $type instanceof ReflectionUnionType || $type instanceof ReflectionIntersectionType) {
-            if ($param->isDefaultValueAvailable()) {
-                return ['value' => $param->getDefaultValue(), 'depId' => null];
-            }
-            throw new ContainerException(
-                "Cannot resolve parameter '{$param->getName()}' in class '$classId'. No type hint, union type, or intersection type. Use set() to define this service manually."
-            );
-        }
-
-        /** @var ReflectionNamedType $type */
-
-        // Primitives (int, string, bool) cannot be autowired unless default value exists
-        if ($type->isBuiltin()) {
-            if ($param->isDefaultValueAvailable()) {
-                return ['value' => $param->getDefaultValue(), 'depId' => null];
-            }
-            throw new ContainerException(
-                "Cannot resolve primitive parameter '{$param->getName()}' (type: {$type->getName()}) in class '$classId'. Use set() to define this service manually."
-            );
-        }
-
-        // It's a class/interface dependency -> Recursion!
-        $depClassName = $type->getName();
         try {
-            return ['value' => $this->get($depClassName), 'depId' => $depClassName];
-        } catch (NotFoundException $e) {
-            // Optional dependency?
-            if ($param->isOptional()) {
-                return ['value' => $param->getDefaultValue(), 'depId' => null];
-            }
-            throw new ContainerException(
-                "Cannot resolve dependency '{$depClassName}' for parameter '{$param->getName()}' in class '$classId'.",
-                0,
-                $e
-            );
+            return $parameters[$index]->getDefaultValue();
+        } catch (\Throwable $e) {
+            throw $this->instantiationFailed($id, $e);
         }
+    }
+
+    private function instantiationFailed(string $id, \Throwable $e): ContainerException
+    {
+        $this->report($id, $e);
+
+        return new ContainerException(
+            "Failed to instantiate '$id': " . $e->getMessage(),
+            0,
+            $e,
+            self::describe($e)
+        );
+    }
+
+    /**
+     * @return list<ReflectionParameter> Empty if the class named by outdated metadata is gone
+     */
+    private static function parameters(string $class): array
+    {
+        return class_exists($class) ? (new ReflectionClass($class))->getConstructor()?->getParameters() ?? [] : [];
     }
 }

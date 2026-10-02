@@ -13,7 +13,7 @@ use Sodaho\Container\Exception\CacheException;
  * serialized metadata. The HMAC covers every byte after the signature line, and exactly
  * the verified bytes are decoded. Same layout as the route cache of sodaho/php-router.
  *
- * @phpstan-type ClassMeta array{class: class-string, dependencies: array<int, string|null>, defaults: array<int, mixed>}
+ * @phpstan-type ClassMeta array{class: class-string, dependencies: array<int, string|null>, defaults: array<int, mixed>, optional: array<int, true>}
  */
 class ContainerCache
 {

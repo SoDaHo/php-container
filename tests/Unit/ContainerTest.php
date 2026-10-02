@@ -771,7 +771,136 @@ class ContainerTest extends TestCase
         $container->get(Fixtures\ServiceWithNullableNoDefault::class);
     }
 
+    public function testOptionalEnumDependencyUsesDefault(): void
+    {
+        $container = new Container();
+
+        $this->assertSame(Fixtures\Mode::Safe, $container->get(Fixtures\ServiceWithEnumDefault::class)->mode);
+    }
+
+    public function testOptionalAbstractDependencyUsesDefault(): void
+    {
+        $container = new Container();
+
+        $this->assertNull($container->get(Fixtures\ServiceWithOptionalAbstract::class)->service);
+    }
+
+    public function testOptionalDependencyUsesBindingWhenThereIsOne(): void
+    {
+        $container = new Container();
+        $container->bind(Fixtures\ServiceInterface::class, Fixtures\ConcreteService::class);
+
+        $this->assertInstanceOf(
+            Fixtures\ConcreteService::class,
+            $container->get(Fixtures\ServiceWithOptionalInterface::class)->service
+        );
+    }
+
+    public function testOptionalDependencyThatExistsButCannotBeBuiltStaysAnError(): void
+    {
+        $container = new Container();
+
+        // ServiceWithConfig is instantiable but needs a string: a wiring mistake, not a missing service
+        $this->expectException(ContainerException::class);
+        $this->expectExceptionMessage("Cannot resolve primitive parameter 'apiKey'");
+
+        $container->get(Fixtures\ServiceWithOptionalBroken::class);
+    }
+
+    public function testObjectDefaultIsUsedWhenNothingIsBound(): void
+    {
+        $container = new Container();
+
+        $this->assertInstanceOf(Fixtures\FileLogger::class, $container->get(Fixtures\ServiceWithObjectDefault::class)->logger);
+    }
+
+    public function testObjectDefaultIsOnlyCreatedWhenItIsUsed(): void
+    {
+        Fixtures\CountingLogger::$created = 0;
+
+        $bound = (new Container())->bind(Fixtures\LoggerInterface::class, Fixtures\FileLogger::class);
+        $this->assertInstanceOf(Fixtures\FileLogger::class, $bound->get(Fixtures\ServiceWithCountingDefault::class)->logger);
+        $this->assertSame(0, Fixtures\CountingLogger::$created);
+
+        $unbound = new Container();
+        $this->assertInstanceOf(Fixtures\CountingLogger::class, $unbound->get(Fixtures\ServiceWithCountingDefault::class)->logger);
+        $this->assertSame(1, Fixtures\CountingLogger::$created);
+    }
+
+    public function testDefaultIsEvaluatedAfterTheDependenciesInFrontOfIt(): void
+    {
+        Fixtures\BootedService::$booted = false;
+
+        $service = (new Container())->get(Fixtures\ServiceWithDefaultAfterDependency::class);
+
+        $this->assertInstanceOf(Fixtures\NeedsBootedService::class, $service->value);
+    }
+
+    /**
+     * @return array<string, array{class-string}>
+     */
+    public static function classesWithThrowingDefault(): array
+    {
+        return [
+            'optional dependency' => [Fixtures\ServiceWithThrowingDefault::class],
+            'untyped parameter' => [Fixtures\ServiceWithThrowingUntypedDefault::class],
+        ];
+    }
+
+    /**
+     * @param class-string $id
+     */
+    #[DataProvider('classesWithThrowingDefault')]
+    public function testDefaultThatThrowsIsReportedLikeAFailingConstructor(string $id): void
+    {
+        $container = new Container();
+        $errors = [];
+        $container->on('error', function (array $data) use (&$errors) {
+            $errors[] = $data;
+        });
+
+        try {
+            $container->get($id);
+            $this->fail('Expected ContainerException');
+        } catch (ContainerException $e) {
+            $this->assertSame("Failed to instantiate '$id': Default failed intentionally", $e->getMessage());
+            $this->assertInstanceOf(\RuntimeException::class, $e->getPrevious());
+            $this->assertNotNull($e->getDebugMessage());
+        }
+
+        $this->assertCount(1, $errors);
+        $this->assertSame($id, $errors[0]['id']);
+        $this->assertInstanceOf(\RuntimeException::class, $errors[0]['exception']);
+    }
+
     // ==================== Failures: Same Result Every Time ====================
+
+    public function testSecondGetAfterConstructorFailureFailsTheSameWay(): void
+    {
+        $container = new Container();
+        $errors = [];
+        $container->on('error', function (array $data) use (&$errors) {
+            $errors[] = $data['exception'];
+        });
+        $messages = [];
+
+        foreach ([1, 2] as $attempt) {
+            try {
+                $container->get(Fixtures\ServiceThrowsInConstructor::class);
+                $this->fail('Expected ContainerException');
+            } catch (ContainerException $e) {
+                $messages[] = $e->getMessage();
+                $this->assertInstanceOf(\RuntimeException::class, $e->getPrevious());
+            }
+        }
+
+        $this->assertSame(
+            "Failed to instantiate '" . Fixtures\ServiceThrowsInConstructor::class . "': Constructor failed intentionally",
+            $messages[0]
+        );
+        $this->assertSame($messages[0], $messages[1]);
+        $this->assertCount(2, $errors);
+    }
 
     public function testWrappedExceptionsCarryTheOriginInTheDebugMessage(): void
     {
@@ -794,6 +923,66 @@ class ContainerTest extends TestCase
     }
 
     // ==================== Hooks: error ====================
+
+    /**
+     * @return array<string, array{string, string, class-string<\Throwable>, string}>
+     */
+    public static function failingIds(): array
+    {
+        return [
+            'class not found' => ['Missing\Service', 'Missing\Service', NotFoundException::class, 'not found'],
+            'unbound interface' => [Fixtures\ServiceInterface::class, Fixtures\ServiceInterface::class, NotFoundException::class, 'not found'],
+            'abstract class' => [Fixtures\AbstractService::class, Fixtures\AbstractService::class, ContainerException::class, 'not instantiable'],
+            'circular' => [Fixtures\CircularA::class, Fixtures\CircularA::class, ContainerException::class, 'Circular dependency detected'],
+            'variadic' => [Fixtures\ServiceWithVariadic::class, Fixtures\ServiceWithVariadic::class, ContainerException::class, 'variadic parameter'],
+            'no type' => [Fixtures\ServiceWithNoTypeNoDefault::class, Fixtures\ServiceWithNoTypeNoDefault::class, ContainerException::class, 'No type hint'],
+            'union type' => [Fixtures\ServiceWithUnionNoDefault::class, Fixtures\ServiceWithUnionNoDefault::class, ContainerException::class, 'No type hint'],
+            'primitive' => [Fixtures\ServiceWithConfig::class, Fixtures\ServiceWithConfig::class, ContainerException::class, 'primitive parameter'],
+            // Reported where it happens: for the dependency that is missing, not for the class that needs it
+            'missing dependency' => [Fixtures\ControllerWithInterface::class, Fixtures\ServiceInterface::class, NotFoundException::class, 'not found'],
+            'failing nested dependency' => [Fixtures\ServiceWithOptionalBroken::class, Fixtures\ServiceWithConfig::class, ContainerException::class, 'primitive parameter'],
+        ];
+    }
+
+    /**
+     * @param class-string<\Throwable> $reportedClass
+     */
+    #[DataProvider('failingIds')]
+    public function testErrorHookIsFiredOnceWhereTheFailureHappens(string $id, string $reportedId, string $reportedClass, string $reportedMessage): void
+    {
+        $container = new Container();
+        $firedErrors = [];
+        $container->on('error', function (array $data) use (&$firedErrors) {
+            $firedErrors[] = $data;
+        });
+
+        try {
+            $container->get($id);
+            $this->fail('Expected ContainerException');
+        } catch (ContainerException) {
+            // Expected
+        }
+
+        $this->assertCount(1, $firedErrors);
+        $this->assertSame($reportedId, $firedErrors[0]['id']);
+        $this->assertSame($reportedClass, $firedErrors[0]['exception']::class);
+        $this->assertStringContainsString($reportedMessage, $firedErrors[0]['exception']->getMessage());
+    }
+
+    public function testErrorHookIsNotFiredWhenAnOptionalDependencyFallsBackToItsDefault(): void
+    {
+        $container = new Container();
+        $fired = 0;
+        $container->on('error', function () use (&$fired) {
+            $fired++;
+        });
+
+        $container->get(Fixtures\ServiceWithOptionalDep::class);
+        $container->get(Fixtures\ServiceWithEnumDefault::class);
+        $container->get(Fixtures\ServiceWithOptionalAbstract::class);
+
+        $this->assertSame(0, $fired);
+    }
 
     public function testErrorHookReportsEachFactoryOnTheWayUp(): void
     {
@@ -912,5 +1101,54 @@ class ContainerTest extends TestCase
         $service = $container->get(Fixtures\ServiceInterface::class);
 
         $this->assertSame([$service], $seen);
+    }
+
+    public function testErrorHookThatUsesTheContainerIsNotCalledForItsOwnFailure(): void
+    {
+        // The logger the hook asks for is what cannot be built
+        $container = new Container();
+        $container->bind(Fixtures\LoggerInterface::class, Fixtures\LoggerNeedingTransport::class);
+        $calls = 0;
+        $failedInsideHook = null;
+        $container->on('error', function () use ($container, &$calls, &$failedInsideHook) {
+            $calls++;
+            try {
+                $container->get(Fixtures\LoggerInterface::class);
+            } catch (ContainerException $e) {
+                $failedInsideHook = $e->getMessage();
+            }
+        });
+
+        try {
+            $container->get(Fixtures\NeedsLogger::class);
+            $this->fail('Expected ContainerException');
+        } catch (ContainerException $e) {
+            $this->assertSame(
+                "Cannot resolve dependency '" . Fixtures\NonExistentInterface::class . "' for parameter 'transport' in class '" . Fixtures\LoggerNeedingTransport::class . "'.",
+                $e->getMessage()
+            );
+        }
+
+        $this->assertSame(1, $calls);
+        $this->assertStringStartsWith('Circular dependency detected: ', (string) $failedInsideHook);
+
+        // The guard is released afterwards: the next failure is reported again
+        try {
+            $container->get('Missing\Service');
+        } catch (NotFoundException) {
+            // Expected
+        }
+        $this->assertSame(2, $calls);
+    }
+
+    public function testErrorHookExceptionReplacesTheContainerException(): void
+    {
+        $container = new Container();
+        $container->on('error', fn () => throw new \RuntimeException('log sink unavailable'));
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('log sink unavailable');
+
+        $container->get('Missing\Service');
     }
 }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Sodaho\Container\Tests\Integration;
 
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Sodaho\Container\Cache\ContainerCache;
 use Sodaho\Container\Container;
@@ -29,6 +30,7 @@ class CacheIntegrationTest extends TestCase
         if (file_exists($this->cacheFile)) {
             unlink($this->cacheFile);
         }
+        UnitFixtures\ServiceFailsOnDemand::$fail = false;
     }
 
     private function container(): Container
@@ -437,6 +439,37 @@ class CacheIntegrationTest extends TestCase
         );
     }
 
+    public function testCacheFileHoldsTheConstructorSignature(): void
+    {
+        $this->warm([Fixtures\TestController::class, UnitFixtures\ServiceWithOptionalInterface::class, Fixtures\ServiceWithDefaults::class]);
+        $stored = (array) (new ContainerCache($this->cacheFile, $this->signatureKey))->load();
+        ksort($stored);
+        $expected = [
+            Fixtures\TestService::class => ['class' => Fixtures\TestService::class, 'dependencies' => [], 'defaults' => [], 'optional' => []],
+            Fixtures\TestController::class => [
+                'class' => Fixtures\TestController::class,
+                'dependencies' => [Fixtures\TestService::class],
+                'defaults' => [],
+                'optional' => [],
+            ],
+            UnitFixtures\ServiceWithOptionalInterface::class => [
+                'class' => UnitFixtures\ServiceWithOptionalInterface::class,
+                'dependencies' => [UnitFixtures\ServiceInterface::class],
+                'defaults' => [],
+                'optional' => [0 => true],
+            ],
+            Fixtures\ServiceWithDefaults::class => [
+                'class' => Fixtures\ServiceWithDefaults::class,
+                'dependencies' => [null, null],
+                'defaults' => ['default', 42],
+                'optional' => [],
+            ],
+        ];
+        ksort($expected);
+
+        $this->assertSame($expected, $stored);
+    }
+
     // ==================== Cache Hooks ====================
 
     public function testCacheMissHookFired(): void
@@ -504,7 +537,121 @@ class CacheIntegrationTest extends TestCase
         $this->assertEmpty($misses);
     }
 
+    // ==================== Warm Resolution Equals Cold Resolution ====================
+
+    /**
+     * What a request observes for one id: the object graph or the exception, plus the hooks.
+     *
+     * @return array{result: string, errors: list<string>, resolved: list<string>}
+     */
+    private function observe(Container $container, string $id): array
+    {
+        $errors = [];
+        $container->on('error', function (array $data) use (&$errors) {
+            $errors[] = $data['id'] . ': ' . $data['exception']::class;
+        });
+        $resolved = [];
+        $container->on('resolve', function (array $data) use (&$resolved) {
+            $resolved[] = $data['id'];
+        });
+
+        try {
+            $result = print_r($container->get($id), true);
+        } catch (ContainerException $e) {
+            $result = $e::class . ': ' . $e->getMessage() . ' / debug: ' . $e->getDebugMessage()
+                . ' / previous: ' . ($e->getPrevious() === null ? 'none' : $e->getPrevious()::class);
+        }
+
+        return ['result' => $result, 'errors' => $errors, 'resolved' => $resolved];
+    }
+
+    /**
+     * @return array<string, array{string, bool}> id, and whether the warm request must be served from the cache
+     *                                            (a class is remembered once its arguments could be put together)
+     */
+    public static function idsForColdAndWarm(): array
+    {
+        return [
+            'no constructor' => [Fixtures\TestService::class, true],
+            'nested dependencies' => [Fixtures\DeepController::class, true],
+            'scalar defaults' => [Fixtures\ServiceWithDefaults::class, true],
+            'union default' => [UnitFixtures\ServiceWithUnionDefault::class, true],
+            'optional interface, nothing bound' => [UnitFixtures\ServiceWithOptionalDep::class, true],
+            'optional abstract class' => [UnitFixtures\ServiceWithOptionalAbstract::class, true],
+            'bound interface' => [UnitFixtures\ControllerWithInterface::class, true],
+            'optional interface, bound' => [UnitFixtures\ServiceWithOptionalInterface::class, true],
+            'enum default' => [UnitFixtures\ServiceWithEnumDefault::class, true],
+            'object default' => [UnitFixtures\ServiceWithObjectDefault::class, true],
+            'untyped object default' => [UnitFixtures\ServiceWithUntypedObjectDefault::class, false],
+            'untyped enum default' => [UnitFixtures\ServiceWithUntypedEnumDefault::class, true],
+            'fails: default throws' => [UnitFixtures\ServiceWithThrowingDefault::class, false],
+            'fails: untyped default throws' => [UnitFixtures\ServiceWithThrowingUntypedDefault::class, false],
+            'fails: missing dependency' => [UnitFixtures\ServiceWithNullableNoDefault::class, false],
+            'fails: optional dependency cannot be built' => [UnitFixtures\ServiceWithOptionalBroken::class, false],
+            'fails: constructor throws' => [UnitFixtures\ServiceThrowsInConstructor::class, true],
+            'fails: circular' => [UnitFixtures\CircularA::class, false],
+            'fails: primitive' => [UnitFixtures\ServiceWithConfig::class, false],
+            'fails: abstract' => [UnitFixtures\AbstractService::class, false],
+            'fails: not found' => ['Missing\Service', false],
+        ];
+    }
+
+    #[DataProvider('idsForColdAndWarm')]
+    public function testWarmResolutionBehavesExactlyLikeColdResolution(string $id, bool $servedFromCache): void
+    {
+        $configure = fn (Container $c): Container => $c->bind(UnitFixtures\ServiceInterface::class, UnitFixtures\ConcreteService::class);
+
+        $cold = $this->observe($configure(new Container(['debug' => true])), $id);
+
+        // First request fills the cache, whatever the outcome
+        $first = $configure($this->container());
+        $this->observe($first, $id);
+        $first->saveCache();
+
+        $warmContainer = $configure($this->container());
+        $events = &$this->countCacheEvents($warmContainer);
+        $warm = $this->observe($warmContainer, $id);
+
+        $this->assertSame($cold, $warm);
+        $this->assertSame($servedFromCache, in_array($id, $events['hit'], true));
+    }
+
+    public function testWarmResolvedClassIsSingleton(): void
+    {
+        $this->warm([Fixtures\TestController::class]);
+
+        $container = $this->container();
+        $controller = $container->get(Fixtures\TestController::class);
+
+        $this->assertSame($controller, $container->get(Fixtures\TestController::class));
+        $this->assertSame($controller->service, $container->get(Fixtures\TestService::class));
+    }
+
     // ==================== Cached Metadata Is Not a Wiring Decision ====================
+
+    public function testBindingAddedAfterCachingIsHonoured(): void
+    {
+        // Cached while nothing was bound: the optional parameter fell back to null
+        $this->warm([UnitFixtures\ServiceWithOptionalInterface::class]);
+
+        $container = $this->container()->bind(UnitFixtures\ServiceInterface::class, UnitFixtures\ConcreteService::class);
+        $events = &$this->countCacheEvents($container);
+
+        $this->assertInstanceOf(
+            UnitFixtures\ConcreteService::class,
+            $container->get(UnitFixtures\ServiceWithOptionalInterface::class)->service
+        );
+        $this->assertContains(UnitFixtures\ServiceWithOptionalInterface::class, $events['hit']);
+    }
+
+    public function testBindingRemovedAfterCachingFallsBackToDefault(): void
+    {
+        $bound = $this->container()->bind(UnitFixtures\ServiceInterface::class, UnitFixtures\ConcreteService::class);
+        $bound->get(UnitFixtures\ServiceWithOptionalInterface::class);
+        $bound->saveCache();
+
+        $this->assertNull($this->container()->get(UnitFixtures\ServiceWithOptionalInterface::class)->service);
+    }
 
     public function testCycleIntroducedByBindingIsDetectedOnWarmCache(): void
     {
@@ -521,6 +668,149 @@ class CacheIntegrationTest extends TestCase
         );
 
         $container->get(UnitFixtures\NeedsLogger::class);
+    }
+
+    public function testConstructorFailureOnWarmCacheIsWrappedAndReported(): void
+    {
+        $this->warm([UnitFixtures\ServiceFailsOnDemand::class]);
+        UnitFixtures\ServiceFailsOnDemand::$fail = true;
+
+        $container = $this->container();
+        $errors = [];
+        $container->on('error', function (array $data) use (&$errors) {
+            $errors[] = $data;
+        });
+
+        try {
+            $container->get(UnitFixtures\ServiceFailsOnDemand::class);
+            $this->fail('Expected ContainerException');
+        } catch (ContainerException $e) {
+            $this->assertSame("Failed to instantiate '" . UnitFixtures\ServiceFailsOnDemand::class . "': Failing on demand", $e->getMessage());
+            $this->assertInstanceOf(\RuntimeException::class, $e->getPrevious());
+        }
+
+        $this->assertCount(1, $errors);
+        $this->assertSame(UnitFixtures\ServiceFailsOnDemand::class, $errors[0]['id']);
+        $this->assertInstanceOf(\RuntimeException::class, $errors[0]['exception']);
+    }
+
+    public function testOutdatedMetadataIsReportedAsContainerException(): void
+    {
+        // The cache predates a code change: TestController gained its constructor parameter afterwards
+        (new ContainerCache($this->cacheFile, $this->signatureKey))->save([
+            Fixtures\TestController::class => [
+                'class' => Fixtures\TestController::class,
+                'dependencies' => [],
+                'defaults' => [],
+                'optional' => [],
+            ],
+        ]);
+
+        $this->expectException(ContainerException::class);
+        $this->expectExceptionMessage("Failed to instantiate '" . Fixtures\TestController::class . "'");
+
+        $this->container()->get(Fixtures\TestController::class);
+    }
+
+    public function testOutdatedMetadataNamesTheParameterByPositionWhenItIsGone(): void
+    {
+        // The cache still lists a dependency for a class that no longer has a constructor
+        (new ContainerCache($this->cacheFile, $this->signatureKey))->save([
+            Fixtures\TestService::class => [
+                'class' => Fixtures\TestService::class,
+                'dependencies' => ['Missing\Dependency'],
+                'defaults' => [],
+                'optional' => [],
+            ],
+        ]);
+
+        $this->expectException(ContainerException::class);
+        $this->expectExceptionMessage(
+            "Cannot resolve dependency 'Missing\Dependency' for parameter '#0' in class '" . Fixtures\TestService::class . "'."
+        );
+
+        $this->container()->get(Fixtures\TestService::class);
+    }
+
+    public function testDefaultMissingFromTheMetadataIsReadFromTheClass(): void
+    {
+        // 1.0.x passed null here; the class knows better
+        (new ContainerCache($this->cacheFile, $this->signatureKey))->save([
+            Fixtures\ServiceWithDefaults::class => ['class' => Fixtures\ServiceWithDefaults::class, 'dependencies' => [null, null], 'defaults' => [1 => 7], 'optional' => []],
+        ]);
+
+        $service = $this->container()->get(Fixtures\ServiceWithDefaults::class);
+
+        $this->assertSame('default', $service->value);
+        $this->assertSame(7, $service->number);
+    }
+
+    public function testMetadataWithoutDefaultsKeyIsCompletedFromTheClass(): void
+    {
+        // The shape 1.0.x accepted from direct users of ContainerCache
+        (new ContainerCache($this->cacheFile, $this->signatureKey))->save([
+            UnitFixtures\ServiceWithNoTypeDefault::class => ['class' => UnitFixtures\ServiceWithNoTypeDefault::class, 'dependencies' => [null]],
+        ]);
+
+        $this->assertSame('default', $this->container()->get(UnitFixtures\ServiceWithNoTypeDefault::class)->value);
+    }
+
+    public function testNullDefaultInTheMetadataIsAValue(): void
+    {
+        // Stored as null when the class was cached; not to be mistaken for "unknown"
+        (new ContainerCache($this->cacheFile, $this->signatureKey))->save([
+            UnitFixtures\ServiceWithNoTypeDefault::class => ['class' => UnitFixtures\ServiceWithNoTypeDefault::class, 'dependencies' => [null], 'defaults' => [0 => null], 'optional' => []],
+        ]);
+
+        $this->assertNull($this->container()->get(UnitFixtures\ServiceWithNoTypeDefault::class)->value);
+    }
+
+    public function testDefaultMissingFromTheMetadataAndFromTheClassIsReported(): void
+    {
+        (new ContainerCache($this->cacheFile, $this->signatureKey))->save([
+            Fixtures\TestController::class => ['class' => Fixtures\TestController::class, 'dependencies' => [null], 'defaults' => [], 'optional' => []],
+        ]);
+
+        $this->expectException(ContainerException::class);
+        $this->expectExceptionMessage("Cannot resolve parameter #0 in class '" . Fixtures\TestController::class . "': the cached metadata is outdated. Clear the cache.");
+
+        $this->container()->get(Fixtures\TestController::class);
+    }
+
+    public function testClassNamedByTheMetadataThatIsGoneIsReportedAsOutdated(): void
+    {
+        (new ContainerCache($this->cacheFile, $this->signatureKey))->save([
+            UnitFixtures\TestService::class => ['class' => 'Removed\\Replacement', 'dependencies' => [null], 'defaults' => [], 'optional' => []],
+        ]);
+
+        $this->expectException(ContainerException::class);
+        $this->expectExceptionMessage("Cannot resolve parameter #0 in class '" . UnitFixtures\TestService::class . "': the cached metadata is outdated. Clear the cache.");
+
+        $this->container()->get(UnitFixtures\TestService::class);
+    }
+
+    public function testClassNamedByTheMetadataIsTheOneThatIsCreated(): void
+    {
+        // As in 1.0.x: the entry says which class to create for the id
+        (new ContainerCache($this->cacheFile, $this->signatureKey))->save([
+            UnitFixtures\TestService::class => ['class' => UnitFixtures\ReplacementService::class, 'dependencies' => [], 'defaults' => [], 'optional' => []],
+        ]);
+
+        $this->assertInstanceOf(UnitFixtures\ReplacementService::class, $this->container()->get(UnitFixtures\TestService::class));
+    }
+
+    public function testUncacheableDefaultIsEvaluatedAfterTheDependenciesInFrontOfItOnEveryRequest(): void
+    {
+        foreach ([1, 2] as $request) {
+            UnitFixtures\BootedService::$booted = false;
+            $container = $this->container();
+
+            $this->assertInstanceOf(
+                UnitFixtures\NeedsBootedService::class,
+                $container->get(UnitFixtures\ServiceWithDefaultAfterDependency::class)->value
+            );
+            $container->saveCache();
+        }
     }
 
     // ==================== Defaults That Cannot Be Cached ====================
@@ -548,7 +838,86 @@ class CacheIntegrationTest extends TestCase
         $this->assertSame($inode, fileinode($this->cacheFile), 'A class that cannot be cached must not make every request rewrite the file');
     }
 
+    public function testObjectAndEnumDefaultsOfOptionalDependenciesAreCachedAsSignatureOnly(): void
+    {
+        $ids = [UnitFixtures\ServiceWithObjectDefault::class, UnitFixtures\ServiceWithEnumDefault::class, UnitFixtures\ServiceWithCountingDefault::class];
+        $this->warm($ids);
+        UnitFixtures\CountingLogger::$created = 0;
+
+        $container = $this->container()->bind(UnitFixtures\LoggerInterface::class, UnitFixtures\FileLogger::class);
+        $events = &$this->countCacheEvents($container);
+
+        $this->assertInstanceOf(UnitFixtures\FileLogger::class, $container->get(UnitFixtures\ServiceWithCountingDefault::class)->logger);
+        $this->assertSame(0, UnitFixtures\CountingLogger::$created, 'A default that is not used must not be created');
+        $this->assertSame(UnitFixtures\Mode::Safe, $container->get(UnitFixtures\ServiceWithEnumDefault::class)->mode);
+        $this->assertSame([UnitFixtures\ServiceWithCountingDefault::class, UnitFixtures\ServiceWithEnumDefault::class], $events['hit']);
+        $this->assertSame([UnitFixtures\FileLogger::class], $events['miss'], 'Only the newly bound implementation is unknown to the cache');
+
+        $unbound = $this->container();
+        $this->assertInstanceOf(UnitFixtures\CountingLogger::class, $unbound->get(UnitFixtures\ServiceWithCountingDefault::class)->logger);
+        $this->assertSame(1, UnitFixtures\CountingLogger::$created);
+    }
+
+    /**
+     * @return array<string, array{class-string}>
+     */
+    public static function classesWhoseOptionalParameterIsGone(): array
+    {
+        return [
+            'constructor removed' => [Fixtures\TestService::class],
+            'parameter no longer has a default' => [Fixtures\TestController::class],
+        ];
+    }
+
+    /**
+     * @param class-string $id
+     */
+    #[DataProvider('classesWhoseOptionalParameterIsGone')]
+    public function testOutdatedOptionalParameterIsReportedInsteadOfGuessed(string $id): void
+    {
+        // The cache says: parameter 0 is optional. The code no longer has that default.
+        (new ContainerCache($this->cacheFile, $this->signatureKey))->save([
+            $id => ['class' => $id, 'dependencies' => [UnitFixtures\NonExistentInterface::class], 'defaults' => [], 'optional' => [0 => true]],
+        ]);
+        $container = $this->container();
+        $errors = [];
+        $container->on('error', function (array $data) use (&$errors) {
+            $errors[] = $data['id'];
+        });
+
+        try {
+            $container->get($id);
+            $this->fail('Expected ContainerException');
+        } catch (ContainerException $e) {
+            $this->assertSame("Cannot resolve parameter #0 in class '$id': the cached metadata is outdated. Clear the cache.", $e->getMessage());
+        }
+
+        $this->assertSame([$id], $errors);
+    }
+
     // ==================== Signature Errors ====================
+
+    public function testInvalidSignatureIsReportedToErrorHook(): void
+    {
+        $this->warm([Fixtures\TestService::class]);
+
+        $container = Container::create(['debug' => false, 'cacheFile' => $this->cacheFile, 'cacheSignature' => 'another-key']);
+        $errors = [];
+        $container->on('error', function (array $data) use (&$errors) {
+            $errors[] = $data;
+        });
+
+        try {
+            $container->get(Fixtures\TestService::class);
+            $this->fail('Expected CacheException');
+        } catch (CacheException $e) {
+            $this->assertSame('Cache file signature is invalid', $e->getMessage());
+        }
+
+        $this->assertCount(1, $errors);
+        $this->assertSame(Fixtures\TestService::class, $errors[0]['id']);
+        $this->assertSame($e, $errors[0]['exception']);
+    }
 
     public function testAfterASignatureErrorTheContainerWorksWithoutTheCacheAndReplacesTheFile(): void
     {
@@ -622,6 +991,69 @@ class CacheIntegrationTest extends TestCase
 
     // ==================== enableCache() After First Use ====================
 
+    public function testEnableCacheAfterResolvingKeepsEarlierMetadataWhenAFileExists(): void
+    {
+        $this->warm([Fixtures\ServiceWithDefaults::class]);
+
+        $container = Container::create(['debug' => false]);
+        $container->get(Fixtures\TestController::class);
+        $container->enableCache($this->cacheFile, $this->signatureKey);
+        $container->get(Fixtures\DeepController::class); // loads the existing file
+        $container->saveCache();
+
+        $next = $this->container();
+        $events = &$this->countCacheEvents($next);
+        $next->get(Fixtures\DeepController::class);
+        $next->get(Fixtures\ServiceWithDefaults::class);
+
+        $this->assertSame([], $events['miss']);
+        $this->assertCount(4, $events['hit']);
+    }
+
+    public function testSwitchingTheCacheFileDropsWhatWasLoadedFromTheOldOne(): void
+    {
+        // File A is outdated for TestController, file B is right
+        $fileA = $this->cacheFile . '.a';
+        (new ContainerCache($fileA, $this->signatureKey))->save([
+            Fixtures\TestService::class => ['class' => Fixtures\TestService::class, 'dependencies' => [], 'defaults' => [], 'optional' => []],
+            Fixtures\TestController::class => ['class' => Fixtures\TestController::class, 'dependencies' => [], 'defaults' => [], 'optional' => []],
+        ]);
+        $this->warm([Fixtures\TestController::class]);
+
+        try {
+            foreach ([$this->cacheFile, $this->cacheFile . '.not-written-yet'] as $fileB) {
+                $container = Container::create(['debug' => false, 'cacheFile' => $fileA, 'cacheSignature' => $this->signatureKey]);
+                $container->get(Fixtures\TestService::class); // loads file A
+                $container->enableCache($fileB);
+
+                $this->assertInstanceOf(Fixtures\TestService::class, $container->get(Fixtures\TestController::class)->service);
+            }
+        } finally {
+            unlink($fileA);
+        }
+    }
+
+    public function testOwnAnalysisIsUsedEvenIfTheFileKnowsTheClassToo(): void
+    {
+        // Analyzed here, but not created: the constructor failed
+        UnitFixtures\ServiceFailsOnDemand::$fail = true;
+        $container = Container::create(['debug' => false]);
+        try {
+            $container->get(UnitFixtures\ServiceFailsOnDemand::class);
+            $this->fail('Expected ContainerException');
+        } catch (ContainerException) {
+            UnitFixtures\ServiceFailsOnDemand::$fail = false;
+        }
+
+        // The file loaded afterwards is outdated for that class
+        (new ContainerCache($this->cacheFile, $this->signatureKey))->save([
+            UnitFixtures\ServiceFailsOnDemand::class => ['class' => UnitFixtures\ServiceFailsOnDemand::class, 'dependencies' => [], 'defaults' => [], 'optional' => []],
+        ]);
+        $container->enableCache($this->cacheFile, $this->signatureKey);
+
+        $this->assertInstanceOf(UnitFixtures\TestService::class, $container->get(UnitFixtures\ServiceFailsOnDemand::class)->service);
+    }
+
     public function testDisableCacheStopsUsingWhatWasLoaded(): void
     {
         // Outdated for TestController; loaded by the first get()
@@ -635,6 +1067,55 @@ class CacheIntegrationTest extends TestCase
         $container->disableCache();
 
         $this->assertInstanceOf(Fixtures\TestService::class, $container->get(Fixtures\TestController::class)->service);
+    }
+
+    public function testDebugModeStopsUsingWhatWasLoaded(): void
+    {
+        // Outdated for TestController; loaded by the first get()
+        (new ContainerCache($this->cacheFile, $this->signatureKey))->save([
+            Fixtures\TestService::class => ['class' => Fixtures\TestService::class, 'dependencies' => [], 'defaults' => [], 'optional' => []],
+            Fixtures\TestController::class => ['class' => Fixtures\TestController::class, 'dependencies' => [], 'defaults' => [], 'optional' => []],
+        ]);
+        $container = $this->container();
+        $container->get(Fixtures\TestService::class);
+
+        $container->setDebug(true);
+
+        $this->assertInstanceOf(Fixtures\TestService::class, $container->get(Fixtures\TestController::class)->service);
+    }
+
+    public function testClearCacheForgetsWhatWasLoaded(): void
+    {
+        $this->warm([Fixtures\TestService::class]);
+        $container = $this->container();
+        $container->get(Fixtures\TestService::class); // loads the file
+
+        $container->clearCache();
+        $container->get(Fixtures\ServiceWithDefaults::class);
+        $container->saveCache();
+
+        $this->assertSame(
+            [Fixtures\ServiceWithDefaults::class],
+            array_keys((array) (new ContainerCache($this->cacheFile, $this->signatureKey))->load())
+        );
+    }
+
+    public function testOwnAnalysisWinsOverTheFile(): void
+    {
+        // Analyzed before the cache was enabled; the file that is loaded afterwards is outdated for the same class
+        $container = Container::create(['debug' => false]);
+        $container->get(Fixtures\ServiceWithDefaults::class);
+        (new ContainerCache($this->cacheFile, $this->signatureKey))->save([
+            Fixtures\ServiceWithDefaults::class => ['class' => Fixtures\ServiceWithDefaults::class, 'dependencies' => [null], 'defaults' => ['outdated'], 'optional' => []],
+        ]);
+
+        $container->enableCache($this->cacheFile, $this->signatureKey);
+        $container->get(Fixtures\TestService::class); // loads the file, adds a class
+        $container->saveCache();
+
+        $stored = (array) (new ContainerCache($this->cacheFile, $this->signatureKey))->load();
+        $this->assertSame(['default', 42], $stored[Fixtures\ServiceWithDefaults::class]['defaults']);
+        $this->assertArrayHasKey(Fixtures\TestService::class, $stored);
     }
 
     // ==================== Concurrent First Requests ====================
