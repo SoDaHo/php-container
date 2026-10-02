@@ -13,31 +13,12 @@ use Sodaho\Container\Container;
  */
 class RealWorldTest extends TestCase
 {
-    private string $cacheFile;
-    private string $signatureKey = 'feature-test-key';
-
-    protected function setUp(): void
-    {
-        $this->cacheFile = sys_get_temp_dir() . '/container_feature_' . uniqid() . '.php';
-    }
-
-    protected function tearDown(): void
-    {
-        if (file_exists($this->cacheFile)) {
-            unlink($this->cacheFile);
-        }
-    }
-
     // ==================== Typical Application Bootstrap ====================
 
     public function testTypicalApplicationBootstrap(): void
     {
         // Simulate typical app bootstrap
-        $container = Container::create([
-            'debug' => false,
-            'cacheFile' => $this->cacheFile,
-            'cacheSignature' => $this->signatureKey,
-        ]);
+        $container = Container::create();
 
         // Bind interfaces to implementations
         $container->bind(Fixtures\LoggerInterface::class, Fixtures\FileLogger::class);
@@ -57,36 +38,6 @@ class RealWorldTest extends TestCase
         $this->assertInstanceOf(Fixtures\Application::class, $app);
         $this->assertInstanceOf(Fixtures\UserController::class, $app->userController);
         $this->assertInstanceOf(Fixtures\FileLogger::class, $app->userController->logger);
-
-        // Save cache for next request
-        $container->saveCache();
-        $this->assertFileExists($this->cacheFile);
-    }
-
-    public function testSubsequentRequestUsesCache(): void
-    {
-        // First request - build cache
-        $container1 = Container::create([
-            'debug' => false,
-            'cacheFile' => $this->cacheFile,
-            'cacheSignature' => $this->signatureKey,
-        ]);
-        $container1->bind(Fixtures\LoggerInterface::class, Fixtures\FileLogger::class);
-        $container1->get(Fixtures\UserController::class);
-        $container1->saveCache();
-
-        // Second request - should use cache
-        $container2 = Container::create([
-            'debug' => false,
-            'cacheFile' => $this->cacheFile,
-            'cacheSignature' => $this->signatureKey,
-        ]);
-        $container2->bind(Fixtures\LoggerInterface::class, Fixtures\FileLogger::class);
-
-        $controller = $container2->get(Fixtures\UserController::class);
-
-        $this->assertInstanceOf(Fixtures\UserController::class, $controller);
-        $this->assertInstanceOf(Fixtures\FileLogger::class, $controller->logger);
     }
 
     // ==================== PSR-11 Compliance ====================
@@ -178,38 +129,5 @@ class RealWorldTest extends TestCase
         $controller = $container->get(Fixtures\UserController::class);
 
         $this->assertInstanceOf(Fixtures\NullLogger::class, $controller->logger);
-    }
-
-    // ==================== Production Cache with Signature ====================
-
-    public function testProductionCacheWithSignature(): void
-    {
-        $secretKey = 'production-secret-key-' . bin2hex(random_bytes(16));
-
-        // Deploy: build cache
-        $container1 = Container::create([
-            'debug' => false,
-            'cacheFile' => $this->cacheFile,
-            'cacheSignature' => $secretKey,
-        ]);
-        $container1->bind(Fixtures\LoggerInterface::class, Fixtures\FileLogger::class);
-        $container1->get(Fixtures\UserController::class);
-        $container1->saveCache();
-
-        // Verify cache has signature
-        $content = file_get_contents($this->cacheFile);
-        $this->assertStringContainsString('HMAC-SHA256:', $content);
-
-        // Production: use cache
-        $container2 = Container::create([
-            'debug' => false,
-            'cacheFile' => $this->cacheFile,
-            'cacheSignature' => $secretKey,
-        ]);
-        $container2->bind(Fixtures\LoggerInterface::class, Fixtures\FileLogger::class);
-
-        $controller = $container2->get(Fixtures\UserController::class);
-
-        $this->assertInstanceOf(Fixtures\UserController::class, $controller);
     }
 }

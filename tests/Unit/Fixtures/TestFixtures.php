@@ -33,6 +33,13 @@ class ServiceWithConfig
     }
 }
 
+class ServiceWithDependencyBeforePrimitive
+{
+    public function __construct(public TestService $service, public string $apiKey)
+    {
+    }
+}
+
 class ServiceWithDefaults
 {
     public function __construct(
@@ -256,20 +263,6 @@ class NeedsLogger
     }
 }
 
-// ==================== Constructor That Fails on Demand ====================
-
-class ServiceFailsOnDemand
-{
-    public static bool $fail = false;
-
-    public function __construct(public TestService $service)
-    {
-        if (self::$fail) {
-            throw new \RuntimeException('Failing on demand');
-        }
-    }
-}
-
 // ==================== Defaults That Run Code ====================
 
 class CountingLogger implements LoggerInterface
@@ -363,8 +356,41 @@ class ServiceWithDefaultAfterDependency
     }
 }
 
-// ==================== Replacement Named by Cached Metadata ====================
+// ==================== A Factory That Uses the Container When It Is Destroyed ====================
 
-class ReplacementService extends TestService
+class FactoryThatAsksOnDestruct
 {
+    public function __construct(private \Sodaho\Container\Container $container, private string $id)
+    {
+    }
+
+    public function __invoke(): AlternativeService
+    {
+        return new AlternativeService();
+    }
+
+    public function __destruct()
+    {
+        $this->container->get($this->id);
+    }
+}
+
+// ==================== A Container That Provides an Entry Itself ====================
+
+class ContainerWithFallback extends \Sodaho\Container\Container
+{
+    public function __construct(private ServiceInterface $service)
+    {
+        parent::__construct();
+    }
+
+    public function get(string $id): mixed
+    {
+        return $id === ServiceInterface::class ? $this->service : parent::get($id);
+    }
+
+    public function has(string $id): bool
+    {
+        return $id === ServiceInterface::class || parent::has($id);
+    }
 }
