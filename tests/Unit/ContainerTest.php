@@ -268,11 +268,8 @@ class ContainerTest extends TestCase
         $container->get(Fixtures\ServiceWithIntersectionNoDefault::class);
     }
 
-    #[\PHPUnit\Framework\Attributes\RequiresPhp('>=8.2')]
     public function testIntersectionTypeWithDefaultUsesDefault(): void
     {
-        require_once __DIR__ . '/Fixtures/Php82/Php82Fixtures.php';
-
         $container = new Container();
         $service = $container->get(Fixtures\ServiceWithIntersectionNullableDefault::class);
 

@@ -82,6 +82,13 @@ interface CountableService extends ServiceInterface, \Countable
 {
 }
 
+class ServiceWithIntersectionNullableDefault
+{
+    public function __construct(public (ServiceInterface&\Countable)|null $value = null)
+    {
+    }
+}
+
 class ServiceWithIntersectionNoDefault
 {
     public function __construct(public ServiceInterface&\Countable $value)
