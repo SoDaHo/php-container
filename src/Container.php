@@ -35,6 +35,9 @@ class Container implements ContainerInterface
     /** @var array<string, true> Entries currently being created (for circular dependency detection) */
     private array $resolving = [];
 
+    /** @var array<string, true> Bindings get() is following to an entry that is being created */
+    private array $following = [];
+
     private bool $reportingError = false;
 
     /**
@@ -71,9 +74,12 @@ class Container implements ContainerInterface
      *
      * @param string $id The class name or identifier
      * @param callable $factory A closure that returns the instance: fn(Container $c) => new Service(...)
+     *
+     * @throws ContainerException If the entry has been created or is being created
      */
     public function set(string $id, callable $factory): void
     {
+        $this->assertNotCreated($id);
         $this->definitions[$id] = $factory;
     }
 
@@ -84,11 +90,24 @@ class Container implements ContainerInterface
      *
      * @param string $interface The interface or abstract class name
      * @param class-string $implementation The concrete class name
+     *
+     * @throws ContainerException If the entry has been created or is being created
      */
     public function bind(string $interface, string $implementation): self
     {
+        $this->assertNotCreated($interface);
         $this->aliases[$interface] = $implementation;
         return $this;
+    }
+
+    /**
+     * Entries are singletons: a definition for one that exists, or is on its way, would never be used.
+     */
+    private function assertNotCreated(string $id): void
+    {
+        if (array_key_exists($id, $this->instances) || isset($this->resolving[$id]) || isset($this->following[$id])) {
+            throw new ContainerException("Cannot redefine '$id': the entry has been created or is being created.");
+        }
     }
 
     /**
@@ -119,7 +138,13 @@ class Container implements ContainerInterface
 
             // 2. Manual Definition (set() overrides bind()) or 4. Autowiring
             if (isset($this->definitions[$target]) || !isset($this->aliases[$target]) || $this->aliases[$target] === $target) {
-                $instance = $this->make($target, array_keys($aliases));
+                $outer = $this->following;
+                $this->following += $aliases;
+                try {
+                    $instance = $this->make($target, array_keys($aliases));
+                } finally {
+                    $this->following = $outer;
+                }
                 break;
             }
 
@@ -179,7 +204,7 @@ class Container implements ContainerInterface
     public function has(string $id): bool
     {
         $seen = [];
-        while (!array_key_exists($id, $this->instances) && !isset($this->definitions[$id])) {
+        while (!isset($this->definitions[$id])) {
             if (!isset($this->aliases[$id]) || $this->aliases[$id] === $id) {
                 return class_exists($id) && new ReflectionClass($id)->isInstantiable();
             }
