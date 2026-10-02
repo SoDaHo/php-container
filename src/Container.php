@@ -207,19 +207,28 @@ class Container implements ContainerInterface
      */
     public function has(string $id): bool
     {
+        $target = $this->target($id);
+
+        return $target !== null
+            && (isset($this->definitions[$target]) || (class_exists($target) && new ReflectionClass($target)->isInstantiable()));
+    }
+
+    /**
+     * The id a chain of bindings ends at: the one with the factory, or the class that is autowired.
+     * Null if the bindings form a cycle.
+     */
+    private function target(string $id): ?string
+    {
         $seen = [];
-        while (!isset($this->definitions[$id])) {
-            if (!isset($this->aliases[$id]) || $this->aliases[$id] === $id) {
-                return class_exists($id) && new ReflectionClass($id)->isInstantiable();
-            }
+        while (isset($this->aliases[$id]) && $this->aliases[$id] !== $id) {
             if (isset($seen[$id])) {
-                return false;
+                return null;
             }
             $seen[$id] = true;
             $id = $this->aliases[$id];
         }
 
-        return true;
+        return $id;
     }
 
     /**
@@ -316,9 +325,18 @@ class Container implements ContainerInterface
                 continue;
             }
 
+            // A class that does not exist is "not found" for whoever asks for it, but an error of the class
+            // that needs it. Judged before get() runs: if the class is there, a NotFoundException is a hook's.
+            $target = $this->target($depId);
+            $missing = $target !== null && !isset($this->definitions[$target]) && !class_exists($target);
+
             try {
                 $arguments[] = $this->get($depId);
             } catch (NotFoundException $e) {
+                if (!$missing) {
+                    throw $e;
+                }
+
                 throw new ContainerException(
                     "Cannot resolve dependency '{$depId}' for parameter '{$param->getName()}' in class '$id'.",
                     0,

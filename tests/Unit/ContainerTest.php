@@ -1573,6 +1573,63 @@ class ContainerTest extends TestCase
         $this->assertSame(2, $calls);
     }
 
+    /**
+     * @return array<string, array{callable(Container): mixed, class-string, string}>
+     */
+    public static function dependenciesWithAFailingResolveHook(): array
+    {
+        return [
+            'concrete class' => [
+                fn (Container $c) => null,
+                Fixtures\TestController::class,
+                Fixtures\TestService::class,
+            ],
+            'bound interface' => [
+                fn (Container $c) => $c->bind(Fixtures\ServiceInterface::class, Fixtures\ConcreteService::class),
+                Fixtures\ControllerWithInterface::class,
+                Fixtures\ConcreteService::class,
+            ],
+            'interface with a factory' => [
+                fn (Container $c) => $c->set(Fixtures\ServiceInterface::class, fn () => new Fixtures\ConcreteService()),
+                Fixtures\ControllerWithInterface::class,
+                Fixtures\ServiceInterface::class,
+            ],
+            'interface bound to an id with a factory' => [
+                function (Container $c): void {
+                    $c->bind(Fixtures\ServiceInterface::class, 'custom');
+                    $c->set('custom', fn () => new Fixtures\ConcreteService());
+                },
+                Fixtures\ControllerWithInterface::class,
+                'custom',
+            ],
+        ];
+    }
+
+    /**
+     * @param callable(Container): mixed $register
+     * @param class-string $id
+     */
+    #[DataProvider('dependenciesWithAFailingResolveHook')]
+    public function testNotFoundExceptionOfAResolveHookIsNotMistakenForAMissingDependency(callable $register, string $id, string $announced): void
+    {
+        $container = new Container();
+        $register($container);
+        $container->on('resolve', function (array $data) use ($container, $announced) {
+            if ($data['id'] === $announced) {
+                $container->get('Missing\Thing');
+            }
+        });
+
+        try {
+            // The dependency is created before its hook fails
+            $container->get($id);
+            $this->fail('Expected NotFoundException');
+        } catch (ContainerException $e) {
+            $this->assertSame(NotFoundException::class, $e::class);
+            $this->assertSame("Class or service 'Missing\Thing' not found.", $e->getMessage());
+        }
+    }
+
     public function testErrorHookExceptionForAMissingDependencyKeepsTheWrapperIfItIsANotFoundException(): void
     {
         // What get() says stays true (the dependency cannot be resolved); the hook's exception is the cause
@@ -1601,6 +1658,20 @@ class ContainerTest extends TestCase
             $container->get(Fixtures\ControllerWithInterface::class);
             $this->fail('Expected RuntimeException');
         } catch (\RuntimeException $e) {
+            $this->assertSame($thrown, $e);
+        }
+    }
+
+    public function testErrorHookExceptionForAMissingDependencyPassesEvenIfItIsAContainerException(): void
+    {
+        $container = new Container();
+        $thrown = new ContainerException('Thrown by the hook');
+        $container->on('error', fn () => throw $thrown);
+
+        try {
+            $container->get(Fixtures\ControllerWithInterface::class);
+            $this->fail('Expected ContainerException');
+        } catch (ContainerException $e) {
             $this->assertSame($thrown, $e);
         }
     }
