@@ -1,6 +1,43 @@
 # Changelog
 
-## [Unreleased]
+## [2.0.0] - Unreleased
+
+### Upgrading from 1.x
+
+| 1.x | 2.0 |
+|---|---|
+| `new Container(['debug' => $debug])`, `Container::create([...])` | `new Container()`. There are no options; a config array that is not empty throws. |
+| `'cacheFile'`, `'cacheSignature'`, `CONTAINER_CACHE_FILE`, `CONTAINER_CACHE_KEY` | Remove them and delete the cache file. |
+| `enableCache()`, `disableCache()`, `saveCache()`, `clearCache()` | Remove the calls. |
+| `setDebug()`, `APP_DEBUG`, `APP_ENV` | Remove the call. Debug mode did nothing but switch the cache off; the container reads no environment variables. |
+| `on('cacheHit', ...)`, `on('cacheMiss', ...)` | Remove them. `on()` throws for an event that does not exist. |
+| `catch (CacheException $e)`, `new ContainerCache(...)`, `ContainerCache::isCacheable()` | No replacement. Remove the code. |
+| `$e->getMessage()` to read what a factory or constructor said | `$e->getDebugMessage()`, or `$e->getPrevious()->getMessage()` |
+| `set()` or `bind()` for an entry that has been created or is just being created (was accepted, and ignored once the entry existed) | It throws. Register before the first `get()` that reaches the id, directly, through a binding or as a dependency; register a replacement for an entry that failed after that `get()` has returned. |
+| `set($id, ...)` followed by `bind($id, ...)` (the definition won) | The binding wins: the last registration counts. Remove the one you do not want. |
+| An optional parameter whose type is bound to a class that is missing or not instantiable, or through a cycle of bindings (got its default) | It throws. Correct the binding or remove it. |
+| A subclass that fires its own events with `trigger()` | List them: `protected const array EVENTS = [...parent::EVENTS, 'boot'];`. A constant `EVENTS` the subclass already has needs another name. |
+| PHP 8.2, 8.3, 8.4 | PHP 8.5 |
+
+### Removed
+
+- The cache: `ContainerCache`, `CacheException`, `enableCache()`, `disableCache()`, `saveCache()`, `clearCache()`, the `cacheHit` and `cacheMiss` hooks, the options `cacheFile` and `cacheSignature`, the variables `CONTAINER_CACHE_FILE` and `CONTAINER_CACHE_KEY`. It cost more than the Reflection it saved.
+- Debug mode: the `debug` option, `setDebug()` and the detection through `APP_DEBUG` and `APP_ENV`.
+- Support for PHP 8.2, 8.3 and 8.4.
+
+### Changed
+
+- When a factory or constructor throws, `getMessage()` names the entry and no longer appends the message of that exception. `getDebugMessage()` has it: `Class in file:line: message` for the wrapped exception and every exception behind it.
+- `set()` and `bind()` throw a `ContainerException` for an entry that was already created or is just being created.
+- `on()` throws a `ContainerException` for an unknown event.
+- The constructor and `create()` throw a `ContainerException` for a config array that is not empty.
+- `create()` called on a subclass returns an instance of that subclass.
+- The last `set()` or `bind()` for an id wins. A `bind()` after a `set()` for the same id used to have no effect.
+- An optional parameter whose type has a binding gets what the binding resolves to. A binding that cannot be resolved (class missing or not instantiable, cycle) throws; it used to fall back to the default.
+
+### Fixed
+
+- A `NotFoundException` thrown by a hook while a class was being autowired was reported as an unresolvable dependency of that class, although the dependency exists.
 
 ## [1.1.0] - 2026-10-02
 
