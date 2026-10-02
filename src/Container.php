@@ -47,7 +47,7 @@ class Container implements ContainerInterface
     private bool $cacheLoaded = false;
     private bool $cacheDirty = false;
 
-    /** @var array<string, true> Classes currently being resolved (for circular dependency detection) */
+    /** @var array<string, true> Entries currently being created (for circular dependency detection) */
     private array $resolving = [];
 
     /**
@@ -211,39 +211,37 @@ class Container implements ContainerInterface
      */
     public function get(string $id): mixed
     {
-        // 1. Singleton: Return existing instance
-        if (array_key_exists($id, $this->instances)) {
-            return $this->instances[$id];
-        }
+        // Follow bind() mappings to the entry that is created. Only that entry is guarded against
+        // re-entry: a hook may ask for an interface while its implementation is being announced.
+        $aliases = [];
+        $target = $id;
 
-        // 2. Manual Definition: Execute factory (set() overrides bind())
-        if (isset($this->definitions[$id])) {
-            $factory = $this->definitions[$id];
-            try {
-                $instance = $factory($this);
-                $this->instances[$id] = $instance;
-                $this->trigger('resolve', ['id' => $id, 'instance' => $instance]);
-                return $instance;
-            } catch (\Throwable $e) {
-                $this->trigger('error', ['id' => $id, 'exception' => $e]);
-                throw new ContainerException(
-                    "Error while creating service '$id': " . $e->getMessage(),
-                    0,
-                    $e,
-                    self::describe($e)
-                );
+        while (true) {
+            // 1. Singleton: Return existing instance
+            if (array_key_exists($target, $this->instances)) {
+                $instance = $this->instances[$target];
+                break;
             }
+
+            // 2. Manual Definition (set() overrides bind()) or 4. Autowiring
+            if (isset($this->definitions[$target]) || !isset($this->aliases[$target]) || $this->aliases[$target] === $target) {
+                $instance = $this->make($target, array_keys($aliases));
+                break;
+            }
+
+            // 3. Alias: Resolve to implementation (bind() mappings)
+            if (isset($aliases[$target])) {
+                throw $this->circular([...array_keys($aliases), $target]);
+            }
+            $aliases[$target] = true;
+            $target = $this->aliases[$target];
         }
 
-        // 3. Alias: Resolve to implementation (bind() mappings)
-        if (isset($this->aliases[$id])) {
-            $instance = $this->get($this->aliases[$id]);
-            $this->instances[$id] = $instance;
-            return $instance;
+        foreach ($aliases as $alias => $_) {
+            $this->instances[$alias] = $instance;
         }
 
-        // 4. Autowiring: Try to resolve class (with cache support)
-        return $this->resolve($id);
+        return $instance;
     }
 
     /**
@@ -321,21 +319,65 @@ class Container implements ContainerInterface
         }
     }
 
+    /**
+     * Create the entry for an id that is not an alias: run its factory or autowire it.
+     *
+     * @param list<string> $via Aliases that led here (for the circular dependency message)
+     */
+    private function make(string $id, array $via): mixed
+    {
+        if (isset($this->resolving[$id])) {
+            throw $this->circular([...$via, $id]);
+        }
+
+        $this->resolving[$id] = true;
+        try {
+            $instance = isset($this->definitions[$id])
+                ? $this->runFactory($id, $this->definitions[$id])
+                : $this->resolve($id);
+        } finally {
+            unset($this->resolving[$id]);
+        }
+
+        $this->instances[$id] = $instance;
+        $this->trigger('resolve', ['id' => $id, 'instance' => $instance]);
+        return $instance;
+    }
+
+    /**
+     * @param list<string> $tail Ids after the entries that are already being created
+     */
+    private function circular(array $tail): ContainerException
+    {
+        return new ContainerException(
+            'Circular dependency detected: ' . implode(' -> ', [...array_keys($this->resolving), ...$tail])
+        );
+    }
+
     private static function describe(\Throwable $e): string
     {
         return sprintf('%s in %s:%d', $e::class, $e->getFile(), $e->getLine());
+    }
+
+    private function runFactory(string $id, callable $factory): mixed
+    {
+        try {
+            return $factory($this);
+        } catch (\Throwable $e) {
+            $this->trigger('error', ['id' => $id, 'exception' => $e]);
+            throw new ContainerException(
+                "Error while creating service '$id': " . $e->getMessage(),
+                0,
+                $e,
+                self::describe($e)
+            );
+        }
     }
 
     private function resolve(string $id): object
     {
         if (!class_exists($id)) {
             throw new NotFoundException("Class or service '$id' not found.");
-        }
-
-        // Circular dependency detection
-        if (isset($this->resolving[$id])) {
-            $chain = implode(' -> ', array_keys($this->resolving)) . ' -> ' . $id;
-            throw new ContainerException("Circular dependency detected: $chain");
         }
 
         /** @var class-string $id */
@@ -354,13 +396,7 @@ class Container implements ContainerInterface
             $this->trigger('cacheMiss', ['id' => $id]);
         }
 
-        // Full Reflection resolve (with circular detection)
-        $this->resolving[$id] = true;
-        try {
-            return $this->resolveWithReflection($id);
-        } finally {
-            unset($this->resolving[$id]);
-        }
+        return $this->resolveWithReflection($id);
     }
 
     /** @param class-string $id */
@@ -378,10 +414,7 @@ class Container implements ContainerInterface
             }
         }
 
-        $instance = new $meta['class'](...$dependencies);
-        $this->instances[$id] = $instance;
-        $this->trigger('resolve', ['id' => $id, 'instance' => $instance]);
-        return $instance;
+        return new $meta['class'](...$dependencies);
     }
 
     /** @param class-string $id */
@@ -404,10 +437,7 @@ class Container implements ContainerInterface
             ];
             $this->cacheDirty = true;
 
-            $instance = new $id();
-            $this->instances[$id] = $instance;
-            $this->trigger('resolve', ['id' => $id, 'instance' => $instance]);
-            return $instance;
+            return new $id();
         }
 
         // Resolve dependencies and build metadata
@@ -436,10 +466,7 @@ class Container implements ContainerInterface
         }
 
         try {
-            $instance = $reflector->newInstanceArgs($dependencies);
-            $this->instances[$id] = $instance;
-            $this->trigger('resolve', ['id' => $id, 'instance' => $instance]);
-            return $instance;
+            return $reflector->newInstanceArgs($dependencies);
         } catch (\Throwable $e) {
             $this->trigger('error', ['id' => $id, 'exception' => $e]);
             throw new ContainerException(

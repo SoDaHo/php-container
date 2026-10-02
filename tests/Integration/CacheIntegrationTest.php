@@ -8,6 +8,7 @@ use PHPUnit\Framework\TestCase;
 use Sodaho\Container\Cache\ContainerCache;
 use Sodaho\Container\Container;
 use Sodaho\Container\Exception\CacheException;
+use Sodaho\Container\Exception\ContainerException;
 use Sodaho\Container\Tests\Unit\Fixtures as UnitFixtures;
 
 /**
@@ -501,6 +502,25 @@ class CacheIntegrationTest extends TestCase
 
         $this->assertEmpty($hits);
         $this->assertEmpty($misses);
+    }
+
+    // ==================== Cached Metadata Is Not a Wiring Decision ====================
+
+    public function testCycleIntroducedByBindingIsDetectedOnWarmCache(): void
+    {
+        // Acyclic when cached: NeedsLogger -> LoggerInterface -> FileLogger
+        $first = $this->container()->bind(UnitFixtures\LoggerInterface::class, UnitFixtures\FileLogger::class);
+        $first->get(UnitFixtures\NeedsLogger::class);
+        $first->saveCache();
+
+        $container = $this->container()->bind(UnitFixtures\LoggerInterface::class, UnitFixtures\NeedsLogger::class);
+
+        $this->expectException(ContainerException::class);
+        $this->expectExceptionMessage(
+            'Circular dependency detected: ' . UnitFixtures\NeedsLogger::class . ' -> ' . UnitFixtures\LoggerInterface::class . ' -> ' . UnitFixtures\NeedsLogger::class
+        );
+
+        $container->get(UnitFixtures\NeedsLogger::class);
     }
 
     // ==================== Defaults That Cannot Be Cached ====================

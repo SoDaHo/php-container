@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Sodaho\Container\Tests\Unit;
 
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Sodaho\Container\Container;
 use Sodaho\Container\Exception\ContainerException;
@@ -676,6 +677,88 @@ class ContainerTest extends TestCase
         $container->get(Fixtures\CircularA::class);
     }
 
+    public function testAliasCycleIsDetected(): void
+    {
+        $container = new Container();
+        $container->bind(Fixtures\FirstInterface::class, Fixtures\SecondInterface::class);
+        $container->bind(Fixtures\SecondInterface::class, Fixtures\FirstInterface::class);
+
+        $this->expectException(ContainerException::class);
+        $this->expectExceptionMessage(
+            'Circular dependency detected: ' . Fixtures\FirstInterface::class . ' -> ' . Fixtures\SecondInterface::class . ' -> ' . Fixtures\FirstInterface::class
+        );
+
+        $container->get(Fixtures\FirstInterface::class);
+    }
+
+    public function testBindingAClassToItselfAutowiresIt(): void
+    {
+        $container = new Container();
+        $container->bind(Fixtures\ConcreteService::class, Fixtures\ConcreteService::class);
+        $this->assertTrue($container->has(Fixtures\ConcreteService::class));
+
+        $service = $container->get(Fixtures\ConcreteService::class);
+
+        $this->assertInstanceOf(Fixtures\ConcreteService::class, $service);
+        $this->assertSame($service, $container->get(Fixtures\ConcreteService::class));
+        $this->assertTrue($container->has(Fixtures\ConcreteService::class));
+    }
+
+    public function testFactoryResolvingItsOwnIdIsDetected(): void
+    {
+        $container = new Container();
+        $container->set('self', fn (Container $c) => $c->get('self'));
+
+        $this->expectException(ContainerException::class);
+        $this->expectExceptionMessage("Error while creating service 'self': Circular dependency detected: self -> self");
+
+        $container->get('self');
+    }
+
+    public function testFactoriesResolvingEachOtherAreDetected(): void
+    {
+        $container = new Container();
+        $container->set('a', fn (Container $c) => $c->get('b'));
+        $container->set('b', fn (Container $c) => $c->get('a'));
+
+        $this->expectException(ContainerException::class);
+        $this->expectExceptionMessage('Circular dependency detected: a -> b -> a');
+
+        $container->get('a');
+    }
+
+    public function testCycleThroughBindingIsDetected(): void
+    {
+        $container = new Container();
+        // NeedsLogger needs LoggerInterface, which is bound back to NeedsLogger
+        $container->bind(Fixtures\LoggerInterface::class, Fixtures\NeedsLogger::class);
+
+        $this->expectException(ContainerException::class);
+        $this->expectExceptionMessage(
+            'Circular dependency detected: ' . Fixtures\NeedsLogger::class . ' -> ' . Fixtures\LoggerInterface::class . ' -> ' . Fixtures\NeedsLogger::class
+        );
+
+        $container->get(Fixtures\NeedsLogger::class);
+    }
+
+    public function testContainerStaysUsableAfterDetectedCycle(): void
+    {
+        $container = new Container();
+        $messages = [];
+
+        foreach ([1, 2] as $attempt) {
+            try {
+                $container->get(Fixtures\CircularA::class);
+                $this->fail('Expected ContainerException');
+            } catch (ContainerException $e) {
+                $messages[] = $e->getMessage();
+            }
+        }
+
+        $this->assertSame($messages[0], $messages[1], 'The chain must not keep ids of an earlier, failed attempt');
+        $this->assertInstanceOf(Fixtures\TestService::class, $container->get(Fixtures\TestService::class));
+    }
+
     // ==================== Optional Dependencies ====================
 
     public function testNullableDependencyWithoutDefaultThrows(): void
@@ -777,5 +860,57 @@ class ContainerTest extends TestCase
         $container->get(\stdClass::class);
 
         $this->assertSame(['first', 'second'], $order);
+    }
+
+    /**
+     * @return array<string, array{string}>
+     */
+    public static function resolvableIds(): array
+    {
+        return [
+            'class without constructor' => [Fixtures\TestService::class],
+            'class with constructor' => [Fixtures\TestController::class],
+            'factory' => ['factory'],
+        ];
+    }
+
+    #[DataProvider('resolvableIds')]
+    public function testResolveHookExceptionIsNotReportedAsAFailedInstantiation(string $id): void
+    {
+        $container = new Container();
+        $container->set('factory', fn () => new \stdClass());
+        $errors = 0;
+        $container->on('error', function () use (&$errors) {
+            $errors++;
+        });
+        $container->on('resolve', function (array $data) use ($id) {
+            if ($data['id'] === $id) {
+                throw new \RuntimeException('Hook failed');
+            }
+        });
+
+        try {
+            $container->get($id);
+            $this->fail('Expected RuntimeException');
+        } catch (\RuntimeException $e) {
+            $this->assertSame('Hook failed', $e->getMessage());
+        }
+
+        $this->assertSame(0, $errors);
+    }
+
+    public function testResolveHookMayAskForTheInterfaceItsImplementationWasBoundTo(): void
+    {
+        $container = new Container();
+        $container->bind(Fixtures\ServiceInterface::class, Fixtures\ConcreteService::class);
+        $seen = [];
+        $container->on('resolve', function (array $data) use ($container, &$seen) {
+            // The outer get() of the interface is still running at this point
+            $seen[] = $container->get(Fixtures\ServiceInterface::class);
+        });
+
+        $service = $container->get(Fixtures\ServiceInterface::class);
+
+        $this->assertSame([$service], $seen);
     }
 }

@@ -195,6 +195,21 @@ class ServiceWithNullableNoDefault
     }
 }
 
+interface FirstInterface
+{
+}
+
+interface SecondInterface
+{
+}
+
+class NeedsLogger
+{
+    public function __construct(public LoggerInterface $logger)
+    {
+    }
+}
+
 class ServiceWithUntypedObjectDefault
 {
     public function __construct(public $logger = new FileLogger())
