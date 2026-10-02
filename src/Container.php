@@ -80,6 +80,8 @@ class Container implements ContainerInterface
     public function set(string $id, callable $factory): void
     {
         $this->assertNotCreated($id);
+        // The last registration for an id wins
+        unset($this->aliases[$id]);
         $this->definitions[$id] = $factory;
     }
 
@@ -97,6 +99,8 @@ class Container implements ContainerInterface
     {
         $this->assertNotCreated($interface);
         $this->aliases[$interface] = $implementation;
+        // Released last: a factory object may have a destructor, which finds the binding in place
+        unset($this->definitions[$interface]);
         return $this;
     }
 
@@ -136,8 +140,8 @@ class Container implements ContainerInterface
                 break;
             }
 
-            // 2. Manual Definition (set() overrides bind()) or 4. Autowiring
-            if (isset($this->definitions[$target]) || !isset($this->aliases[$target]) || $this->aliases[$target] === $target) {
+            // 2. Manual Definition or 4. Autowiring
+            if (!isset($this->aliases[$target]) || $this->aliases[$target] === $target) {
                 $outer = $this->following;
                 $this->following += $aliases;
                 try {

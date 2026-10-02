@@ -426,6 +426,49 @@ class ContainerTest extends TestCase
         $this->assertInstanceOf(Fixtures\AlternativeService::class, $service);
     }
 
+    public function testBindOverridesSet(): void
+    {
+        $container = new Container();
+        $container->set(Fixtures\ServiceInterface::class, fn () => new Fixtures\AlternativeService());
+        $container->bind(Fixtures\ServiceInterface::class, Fixtures\ConcreteService::class);
+
+        $this->assertInstanceOf(Fixtures\ConcreteService::class, $container->get(Fixtures\ServiceInterface::class));
+    }
+
+    public function testHasFollowsTheLastRegistration(): void
+    {
+        $container = new Container();
+        $container->set('service', fn () => new Fixtures\ConcreteService());
+        $container->bind('service', 'Missing\Implementation');
+
+        $this->assertFalse($container->has('service'));
+
+        $container->set('service', fn () => new Fixtures\ConcreteService());
+
+        $this->assertTrue($container->has('service'));
+    }
+
+    public function testBindingIsInPlaceWhenTheFactoryItReplacesIsDestroyed(): void
+    {
+        // The container holds the only reference to the factory, whose destructor asks for the entry
+        $container = new Container();
+        $container->set(Fixtures\ServiceInterface::class, new Fixtures\FactoryThatAsksOnDestruct($container, Fixtures\ServiceInterface::class));
+
+        $container->bind(Fixtures\ServiceInterface::class, Fixtures\ConcreteService::class);
+
+        $this->assertInstanceOf(Fixtures\ConcreteService::class, $container->get(Fixtures\ServiceInterface::class));
+        $this->assertTrue($container->has(Fixtures\ServiceInterface::class));
+    }
+
+    public function testBindingAClassToItselfReplacesItsFactory(): void
+    {
+        $container = new Container();
+        $container->set(Fixtures\TestController::class, fn () => throw new \LogicException('The factory was replaced'));
+        $container->bind(Fixtures\TestController::class, Fixtures\TestController::class);
+
+        $this->assertInstanceOf(Fixtures\TestController::class, $container->get(Fixtures\TestController::class));
+    }
+
     public function testEveryBindingOnTheWayIsAnEntryOfItsOwn(): void
     {
         $container = new Container();
