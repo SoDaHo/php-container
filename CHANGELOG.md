@@ -4,9 +4,11 @@
 
 ### Upgrading from 1.x
 
+The table starts at 1.1.0. Coming from 1.0.x, the changes of 1.1.0 (below) apply as well. The one most likely to show: the `error` hook also fires for failures the container detects itself (entry not found, class not instantiable, unresolvable parameter, circular dependency) and for a default value that throws, so a hook that logs writes more lines.
+
 | 1.x | 2.0 |
 |---|---|
-| `new Container(['debug' => $debug])`, `Container::create([...])` | `new Container()`. There are no options; a config array that is not empty throws. |
+| `new Container(['debug' => $debug])`, `Container::create([...])` | `new Container()`. There are no options; a config array that is not empty throws. If your own code validated the value while reading it (an invalid `APP_DEBUG` stopped the application at startup), keep that check; only the argument goes. |
 | `'cacheFile'`, `'cacheSignature'`, `CONTAINER_CACHE_FILE`, `CONTAINER_CACHE_KEY` | Remove them and delete the cache file. |
 | `enableCache()`, `disableCache()`, `saveCache()`, `clearCache()` | Remove the calls. |
 | `setDebug()`, `APP_DEBUG`, `APP_ENV` | Remove the call. Debug mode did nothing but switch the cache off; the container reads no environment variables. |
