@@ -58,7 +58,7 @@ Only if you use the cache:
 
 ### Deprecated
 
-- The cache and everything that configures it (`cacheFile`, `cacheSignature`, `CONTAINER_CACHE_*`, `enableCache()`, `disableCache()`, `saveCache()`, `clearCache()`, the `cacheHit` and `cacheMiss` hooks, `ContainerCache`, `CacheException`) will be removed in 2.0. It does not pay off; the README has the measurements.
+- The cache and everything that configures it (`cacheFile`, `cacheSignature`, `CONTAINER_CACHE_*`, `enableCache()`, `disableCache()`, `saveCache()`, `clearCache()`, the `cacheHit` and `cacheMiss` hooks, `ContainerCache`, `CacheException`) will be removed in 2.0. It does not pay off; the README of 1.1.0 has the measurements.
 
 ### Changed
 
