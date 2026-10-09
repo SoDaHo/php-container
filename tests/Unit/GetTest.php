@@ -65,6 +65,16 @@ class GetTest extends TestCase
         $container->get('NonExistentClass');
     }
 
+    public function testCloneSharesTheEntriesCreatedSoFarOnly(): void
+    {
+        $container = new Container();
+        $before = $container->get(Fixtures\TestService::class);
+        $copy = clone $container;
+
+        $this->assertSame($before, $copy->get(Fixtures\TestService::class));
+        $this->assertNotSame($container->get(Fixtures\ConcreteService::class), $copy->get(Fixtures\ConcreteService::class));
+    }
+
     public function testFactoryReceivesContainer(): void
     {
         $container = new Container();

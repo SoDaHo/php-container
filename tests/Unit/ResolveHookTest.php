@@ -31,6 +31,19 @@ class ResolveHookTest extends TestCase
         $this->assertInstanceOf(\stdClass::class, $firedEvents[0]['instance']);
     }
 
+    public function testResolveHookIsFiredForDependenciesFirst(): void
+    {
+        $container = new Container();
+        $ids = [];
+        $container->on('resolve', function (array $data) use (&$ids) {
+            $ids[] = $data['id'];
+        });
+
+        $container->get(Fixtures\DeepController::class);
+
+        $this->assertSame([Fixtures\TestService::class, Fixtures\TestController::class, Fixtures\DeepController::class], $ids);
+    }
+
     public function testResolveHookNotFiredForSingletonHit(): void
     {
         $container = new Container();

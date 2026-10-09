@@ -12,7 +12,7 @@ Lightweight PSR-11 dependency injection container for PHP. Autowiring, zero bloa
 **What it deliberately does not:**
 - Attribute-based configuration
 - Caching of Reflection results (measured: it costs more than it saves)
-- Lazy proxies / code generation
+- Lazy objects (PHP 8.4 has them built in: return `ReflectionClass::newLazyProxy()` from a `set()` factory)
 - Compiler passes
 - Tagged services
 
@@ -122,6 +122,16 @@ A concrete class that exists but cannot be built (for example because it needs a
 
 Once an entry has been created with the default, `set()` and `bind()` for that type throw a `ContainerException`: the entry would keep its default and never see the definition. Register them before the first `get()`.
 
+### Checking for an Entry
+
+`has($id)` is true when `get($id)` has something to return: a `set()` definition, a `bind()` chain that ends at one or at a class, or a class that can be instantiated. It follows bindings but creates nothing, so it does not check the constructor's parameters: `get()` can still fail with a `ContainerException`. When `has()` is false, `get()` throws a `NotFoundException` (a cycle of bindings is the exception, see Exceptions).
+
+```php
+if ($container->has(CacheInterface::class)) {
+    $cache = $container->get(CacheInterface::class);
+}
+```
+
 ### Static Analysis
 
 `get()` is typed for PHPStan: with a class name it returns that class, with any other id `mixed`.
@@ -162,9 +172,9 @@ $container->on('error', function (array $data) {
 });
 ```
 
-**Note:** Hooks only fire when a new instance is created. Singleton cache hits (returning an already-resolved instance) do not trigger `resolve`. An id resolved through `bind()` fires `resolve` for the implementation, not for the interface.
+**Note:** Hooks only fire when a new instance is created. Singleton cache hits (returning an already-resolved instance) do not trigger `resolve`. An id resolved through `bind()` fires `resolve` for the implementation, not for the interface. `resolve` fires once the entry exists, so dependencies come first: for a `Controller` that needs a `Service` that needs a `Logger`, the order is `Logger`, `Service`, `Controller`.
 
-`error` fires once where the container detects the failure, also when the caller catches the exception: `id` is the entry that could not be created (a missing dependency, not the class that needs it), `exception` is the original exception of a factory or constructor, otherwise the container's own. A factory that fails because an entry it requested failed is reported as well. An `error` hook may use the container, but should catch what `get()` throws there: while an `error` hook runs, further failures are not reported to any `error` hook, and asking for the entry that is just being created fails as a circular dependency. `set()` or `bind()` for that entry throws there, too: register a replacement after `get()` has failed.
+`error` fires once where the container detects the failure, also when the caller catches the exception (not for an exception thrown by a `resolve` hook, which leaves `get()` as it is): `id` is the entry that could not be created (a missing dependency, not the class that needs it), `exception` is the original exception of a factory or constructor, otherwise the container's own. A factory that fails because an entry it requested failed is reported as well. An `error` hook may use the container, but should catch what `get()` throws there: while an `error` hook runs, further failures are not reported to any `error` hook, and asking for the entry that is just being created fails as a circular dependency. `set()` or `bind()` for that entry throws there, too: register a replacement after `get()` has failed.
 
 Hooks fail hard: the container does not catch an exception thrown inside a hook (inside a `set()` factory it is wrapped like anything else the factory throws). An entry whose `resolve` hook throws is not kept, nor are bindings to it the hook asked for: the next `get()` runs the factory or constructor and the hook again, and `set()` or `bind()` for it are accepted until then. A throwing `error` hook replaces the exception `get()` was about to throw (for a missing dependency: the `NotFoundException` inside the `ContainerException`, if the hook throws a `NotFoundException` itself).
 
@@ -178,7 +188,7 @@ Hooks fail hard: the container does not catch an exception thrown inside a hook 
 
 `getMessage()` names ids, classes and parameters, and nothing else. When a factory or constructor throws, the container's message says which entry failed, not what the exception said: that text may contain connection strings or paths. Control characters in an id are escaped there (a line break shows as `\x0A`), so an id cannot add a line to a log; the `error` hook receives the id unchanged.
 
-The details are in `getDebugMessage()`: `Class in file:line: message` for the wrapped exception and every exception behind it, joined by ` <- `. It is `null` for failures the container detects itself. The original exception is available via `getPrevious()`, and the `error` hook receives it directly. Log these, show end users a generic message.
+The details are in `getDebugMessage()`: `Class in file:line: message` for the wrapped exception and every exception behind it, joined by ` <- `. It is `null` for failures the container detects itself. The original exception is available via `getPrevious()`, and the `error` hook receives it directly, unchanged: its message, and its trace with the arguments of every call unless `zend.exception_ignore_args` is on (it is in `php.ini-production`, not in development). Log these, show end users a generic message.
 
 ## Exceptions
 
@@ -209,7 +219,7 @@ An exception thrown while a class is loaded (by an autoloader, or a syntax error
 
 ## Limitations
 
-The container is intentionally minimal. It does **not** support:
+The container is intentionally minimal:
 
 | Feature | Status | Alternative |
 |---------|--------|-------------|
@@ -222,8 +232,14 @@ The container is intentionally minimal. It does **not** support:
 | Intersection types | Default only | Use `set()` for manual definition |
 | Attributes | Not supported | Use `set()` for configuration |
 | Tagged services | Not supported | Not needed for simple DI |
-| Lazy proxies | Not supported | Would require code generation |
+| Lazy objects | Not built in | PHP's own lazy objects (8.4) in a `set()` factory |
 | Compiler passes | Not supported | Framework territory |
+
+### Concurrency and Copies
+
+A container is meant for one request at a time. Fibers or coroutines that share one see each other's entries in creation: a second `get()` of an entry the first has not finished yet fails as a circular dependency. Use one container per request or coroutine, or create the shared entries before they start.
+
+`clone $container` copies the registrations and shares the entries created so far; entries created afterwards exist once in each copy. Hooks that captured the original container (`use ($container)`) keep using the original; factories get the container that runs them.
 
 ## Requirements
 
