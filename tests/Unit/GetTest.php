@@ -69,9 +69,9 @@ class GetTest extends TestCase
     {
         $container = new Container();
         $container->set('dep', fn () => 'dependency-value');
-        $container->set('service', fn (Container $c) => 'got: ' . $c->get('dep'));
+        $container->set('service', fn (Container $c) => ['got', $c->get('dep')]);
 
-        $this->assertEquals('got: dependency-value', $container->get('service'));
+        $this->assertSame(['got', 'dependency-value'], $container->get('service'));
     }
 
     public function testFactoryExceptionIsWrapped(): void

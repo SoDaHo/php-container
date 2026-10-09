@@ -98,6 +98,7 @@ class ServiceWithIntersectionNoDefault
 
 class ServiceWithNoTypeDefault
 {
+    // @phpstan-ignore missingType.parameter (no type on purpose: the container sees no type here)
     public function __construct(public $value = 'default')
     {
     }
@@ -105,6 +106,7 @@ class ServiceWithNoTypeDefault
 
 class ServiceWithNoTypeNoDefault
 {
+    // @phpstan-ignore missingType.parameter (no type on purpose: the container sees no type here)
     public function __construct(public $value)
     {
     }
@@ -292,6 +294,7 @@ class ServiceWithThrowingDefault
 
 class ServiceWithThrowingUntypedDefault
 {
+    // @phpstan-ignore missingType.parameter (no type on purpose: the container sees no type here)
     public function __construct(public $logger = new ThrowingLogger())
     {
     }
@@ -299,6 +302,7 @@ class ServiceWithThrowingUntypedDefault
 
 class ServiceWithUntypedObjectDefault
 {
+    // @phpstan-ignore missingType.parameter (no type on purpose: the container sees no type here)
     public function __construct(public $logger = new FileLogger())
     {
     }
@@ -306,6 +310,7 @@ class ServiceWithUntypedObjectDefault
 
 class ServiceWithUntypedEnumDefault
 {
+    // @phpstan-ignore missingType.parameter (no type on purpose: the container sees no type here)
     public function __construct(public $mode = Mode::Safe)
     {
     }
@@ -344,6 +349,7 @@ class NeedsBootedService
 
 class ServiceWithDefaultAfterDependency
 {
+    // @phpstan-ignore missingType.parameter (no type on purpose: the container sees no type here)
     public function __construct(public BootedService $boot, public $value = new NeedsBootedService())
     {
     }

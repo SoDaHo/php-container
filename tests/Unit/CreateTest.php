@@ -52,6 +52,7 @@ class CreateTest extends TestCase
         $this->expectException(ContainerException::class);
         $this->expectExceptionMessage('The container has no options');
 
+        // @phpstan-ignore argument.type (what a caller without static analysis passes)
         Container::create(['debug' => true]);
     }
 

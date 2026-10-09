@@ -75,8 +75,10 @@ class CircularDependencyTest extends TestCase
             $this->fail('Expected ContainerException');
         } catch (ContainerException $e) {
             $this->assertSame("Error while creating service 'a'.", $e->getMessage());
-            $this->assertSame("Error while creating service 'b'.", $e->getPrevious()?->getMessage());
-            $this->assertSame('Circular dependency detected: a -> b -> a', $e->getPrevious()?->getPrevious()?->getMessage());
+            $previous = $e->getPrevious();
+            $this->assertInstanceOf(ContainerException::class, $previous);
+            $this->assertSame("Error while creating service 'b'.", $previous->getMessage());
+            $this->assertSame('Circular dependency detected: a -> b -> a', $previous->getPrevious()?->getMessage());
         }
     }
 

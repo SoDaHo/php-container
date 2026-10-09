@@ -97,8 +97,10 @@ class ErrorHookTest extends TestCase
 
         $this->assertCount(1, $firedErrors);
         $this->assertSame($reportedId, $firedErrors[0]['id']);
-        $this->assertSame($reportedClass, $firedErrors[0]['exception']::class);
-        $this->assertStringContainsString($reportedMessage, $firedErrors[0]['exception']->getMessage());
+        $exception = $firedErrors[0]['exception'];
+        $this->assertInstanceOf(\Throwable::class, $exception);
+        $this->assertSame($reportedClass, $exception::class);
+        $this->assertStringContainsString($reportedMessage, $exception->getMessage());
     }
 
     public function testErrorHookIsFiredForACycleOfBindings(): void
@@ -139,7 +141,7 @@ class ErrorHookTest extends TestCase
             $this->assertCount(1, $firedErrors);
             $this->assertSame('Missing\Implementation', $firedErrors[0]['id']);
             $this->assertSame($e->getPrevious(), $firedErrors[0]['exception']);
-            $this->assertSame("Class or service 'Missing\Implementation' not found.", $firedErrors[0]['exception']->getMessage());
+            $this->assertSame("Class or service 'Missing\Implementation' not found.", $e->getPrevious()?->getMessage());
         }
     }
 

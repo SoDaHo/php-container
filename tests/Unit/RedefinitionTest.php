@@ -153,7 +153,9 @@ class RedefinitionTest extends TestCase
     {
         $container = new Container();
         $container->on('error', function (array $data) use ($container) {
-            $container->set($data['id'], fn () => new \stdClass());
+            $id = $data['id'];
+            $this->assertIsString($id);
+            $container->set($id, fn () => new \stdClass());
         });
 
         try {

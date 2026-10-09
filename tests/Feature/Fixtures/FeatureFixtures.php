@@ -22,6 +22,9 @@ interface CacheInterface
 
 interface DatabaseInterface
 {
+    /**
+     * @return list<array<string, mixed>>
+     */
     public function query(string $sql): array;
 }
 
@@ -73,6 +76,9 @@ class ArrayCache implements CacheInterface
 
 class SqliteDatabase implements DatabaseInterface
 {
+    /**
+     * @return list<array<string, mixed>>
+     */
     public function query(string $sql): array
     {
         return [];

@@ -18,7 +18,9 @@ class PackageTest extends TestCase
         $this->assertIsArray($composer);
 
         $this->assertSame(['psr/container-implementation' => '2.0'], $composer['provide'] ?? null);
-        $this->assertSame('^2.0', $composer['require']['psr/container'] ?? null, 'The version provided is the one implemented');
+        $require = $composer['require'] ?? null;
+        $this->assertIsArray($require);
+        $this->assertSame('^2.0', $require['psr/container'] ?? null, 'The version provided is the one implemented');
     }
 
     public function testContainerDoesNotReadTheEnvironment(): void
