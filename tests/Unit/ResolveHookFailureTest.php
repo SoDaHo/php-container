@@ -100,6 +100,28 @@ class ResolveHookFailureTest extends TestCase
         );
     }
 
+    public function testDefaultsOfTwoParametersOfOneTypeAreUndoneOnce(): void
+    {
+        // Defaults for ServiceInterface, ServiceInterface and LoggerInterface: each type counts once
+        $container = new Container();
+        $this->failOnce($container, Fixtures\ServiceWithTwoOptionalsOfOneType::class);
+
+        // An application that turns warnings into exceptions must still see the hook's exception
+        set_error_handler(static fn (int $level, string $message) => throw new \ErrorException($message, 0, $level));
+        try {
+            $this->getFails($container, Fixtures\ServiceWithTwoOptionalsOfOneType::class);
+        } finally {
+            restore_error_handler();
+        }
+        $container->bind(Fixtures\ServiceInterface::class, Fixtures\ConcreteService::class);
+        $container->bind(Fixtures\LoggerInterface::class, Fixtures\FileLogger::class);
+
+        $service = $container->get(Fixtures\ServiceWithTwoOptionalsOfOneType::class);
+        $this->assertInstanceOf(Fixtures\ConcreteService::class, $service->first);
+        $this->assertSame($service->first, $service->second);
+        $this->assertInstanceOf(Fixtures\FileLogger::class, $service->logger);
+    }
+
     public function testOtherEntriesWithTheSameValueAreKept(): void
     {
         // Two factories return the same value: only the entry whose hook threw goes

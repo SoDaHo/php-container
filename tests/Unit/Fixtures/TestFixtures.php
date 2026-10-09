@@ -457,3 +457,15 @@ class ServiceWithOptionalInterfaceThatThrows
         throw new \RuntimeException('Constructor failed intentionally');
     }
 }
+
+// ==================== Two Parameters of One Type That Both Get Their Default ====================
+
+class ServiceWithTwoOptionalsOfOneType
+{
+    public function __construct(
+        public ?ServiceInterface $first = null,
+        public ?ServiceInterface $second = null,
+        public ?LoggerInterface $logger = null,
+    ) {
+    }
+}

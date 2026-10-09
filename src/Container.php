@@ -404,7 +404,7 @@ class Container implements ContainerInterface
      * Autowire a class: every constructor parameter is checked first, then the dependencies are created in
      * parameter order and the class is instantiated. Nothing is created when a parameter cannot be filled.
      *
-     * @param list<string> $defaulted Filled with the types of the parameters that got their default
+     * @param list<string> $defaulted Filled with the types of the parameters that got their default, each once
      *
      * @param-out list<string> $defaulted
      */
@@ -447,7 +447,8 @@ class Container implements ContainerInterface
             // No class dependency, or an optional one nothing is bound to and the container cannot create: the default
             if ($depId === null || ($param->isOptional() && !isset($this->aliases[$depId]) && !$this->has($depId))) {
                 $arguments[] = $this->defaultValue($id, $param);
-                if ($depId !== null) {
+                // Each type once, however many parameters it has: discard() removes it once
+                if ($depId !== null && !in_array($depId, $defaulted, true)) {
                     $defaulted[] = $depId;
                 }
                 continue;
