@@ -91,7 +91,7 @@ class Container implements ContainerInterface
     {
         if (!in_array($event, static::EVENTS, true)) {
             throw new ContainerException(
-                "Unknown event '$event'. Available: " . implode(', ', static::EVENTS) . '.'
+                'Unknown event \'' . self::name($event) . "'. Available: " . implode(', ', static::EVENTS) . '.'
             );
         }
 
@@ -139,13 +139,16 @@ class Container implements ContainerInterface
     private function assertNotCreated(string $id): void
     {
         if (array_key_exists($id, $this->instances) || isset($this->resolving[$id]) || isset($this->following[$id])) {
-            throw new ContainerException("Cannot redefine '$id': the entry has been created or is being created.");
+            throw new ContainerException('Cannot redefine \'' . self::name($id) . "': the entry has been created or is being created.");
         }
 
         // An entry that got a default for this type would keep it: the definition would reach it as little
         if (isset($this->defaulted[$id])) {
-            $entry = array_key_first($this->defaulted[$id]);
-            throw new ContainerException("Cannot define '$id': '$entry' has been created with the default value in its place.");
+            // Never empty: discard() removes a type together with its last entry
+            $entry = (string) array_key_first($this->defaulted[$id]);
+            throw new ContainerException(
+                'Cannot define \'' . self::name($id) . "': '" . self::name($entry) . "' has been created with the default value in its place."
+            );
         }
     }
 
@@ -273,7 +276,10 @@ class Container implements ContainerInterface
     private function circular(array $tail): ContainerException
     {
         return new ContainerException(
-            'Circular dependency detected: ' . implode(' -> ', [...array_keys($this->resolving), ...$tail])
+            'Circular dependency detected: ' . implode(' -> ', array_map(
+                fn (int|string $id) => self::name((string) $id),
+                [...array_keys($this->resolving), ...$tail]
+            ))
         );
     }
 
@@ -340,6 +346,19 @@ class Container implements ContainerInterface
     }
 
     /**
+     * An id as exception messages name it: control characters escaped (a line break as \x0A), so that an id
+     * with a line break cannot add a line to a log that writes the message. Backslashes of class names stay.
+     */
+    private static function name(string $id): string
+    {
+        return (string) preg_replace_callback(
+            '/[\x00-\x1F\x7F]/',
+            fn (array $char) => sprintf('\x%02X', ord($char[0])),
+            $id
+        );
+    }
+
+    /**
      * What a wrapped exception and the ones behind it say, and where they come from. For the debug
      * message only: their text can contain values (a DSN, a path) that getMessage() must not carry.
      */
@@ -360,7 +379,7 @@ class Container implements ContainerInterface
         } catch (\Throwable $e) {
             $this->report($id, $e);
             throw new ContainerException(
-                "Error while creating service '$id'.",
+                'Error while creating service \'' . self::name($id) . "'.",
                 0,
                 $e,
                 self::describe($e)
@@ -378,8 +397,8 @@ class Container implements ContainerInterface
         if (!class_exists($id)) {
             // An interface gets here when nothing is bound to it
             $message = interface_exists($id)
-                ? "Interface '$id' not found: no implementation is bound to it."
-                : "Class or service '$id' not found.";
+                ? 'Interface \'' . self::name($id) . "' not found: no implementation is bound to it."
+                : 'Class or service \'' . self::name($id) . "' not found.";
             throw $this->fail($id, new NotFoundException($message));
         }
 
@@ -392,7 +411,7 @@ class Container implements ContainerInterface
                 $reflector->isAbstract() => 'it is abstract',
                 default => 'its constructor is not public',
             };
-            throw $this->fail($id, new NotFoundException("Class '$id' is not instantiable: $reason."));
+            throw $this->fail($id, new NotFoundException('Class \'' . self::name($id) . "' is not instantiable: $reason."));
         }
 
         $parameters = $reflector->getConstructor()?->getParameters() ?? [];
@@ -431,7 +450,7 @@ class Container implements ContainerInterface
                 }
 
                 throw new ContainerException(
-                    "Cannot resolve dependency '{$depId}' for parameter '{$param->getName()}' in class '$id'.",
+                    'Cannot resolve dependency \'' . self::name($depId) . "' for parameter '{$param->getName()}' in class '" . self::name($id) . "'.",
                     0,
                     $e
                 );
@@ -453,7 +472,7 @@ class Container implements ContainerInterface
         // Variadic parameters (...$args) are not supported for autowiring
         if ($param->isVariadic()) {
             throw $this->fail($id, new ContainerException(
-                "Cannot resolve variadic parameter '...{$param->getName()}' in class '$id'. Use set() to define this service manually."
+                "Cannot resolve variadic parameter '...{$param->getName()}' in class '" . self::name($id) . "'. Use set() to define this service manually."
             ));
         }
 
@@ -468,7 +487,7 @@ class Container implements ContainerInterface
                     default => 'an intersection type',
                 };
                 throw $this->fail($id, new ContainerException(
-                    "Cannot resolve parameter '{$param->getName()}' in class '$id': it has $kind. Use set() to define this service manually."
+                    "Cannot resolve parameter '{$param->getName()}' in class '" . self::name($id) . "': it has $kind. Use set() to define this service manually."
                 ));
             }
             return null;
@@ -478,7 +497,7 @@ class Container implements ContainerInterface
         if ($type->isBuiltin()) {
             if (!$param->isDefaultValueAvailable()) {
                 throw $this->fail($id, new ContainerException(
-                    "Cannot resolve primitive parameter '{$param->getName()}' (type: {$type->getName()}) in class '$id'. Use set() to define this service manually."
+                    "Cannot resolve primitive parameter '{$param->getName()}' (type: {$type->getName()}) in class '" . self::name($id) . "'. Use set() to define this service manually."
                 ));
             }
             return null;
@@ -512,7 +531,7 @@ class Container implements ContainerInterface
         $this->report($id, $e);
 
         return new ContainerException(
-            "Failed to instantiate '$id'.",
+            'Failed to instantiate \'' . self::name($id) . "'.",
             0,
             $e,
             self::describe($e)

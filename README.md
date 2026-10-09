@@ -176,7 +176,7 @@ Hooks fail hard: the container does not catch an exception thrown inside a hook 
 
 ### Exception Messages
 
-`getMessage()` names ids, classes and parameters, and nothing else. When a factory or constructor throws, the container's message says which entry failed, not what the exception said: that text may contain connection strings or paths.
+`getMessage()` names ids, classes and parameters, and nothing else. When a factory or constructor throws, the container's message says which entry failed, not what the exception said: that text may contain connection strings or paths. Control characters in an id are escaped there (a line break shows as `\x0A`), so an id cannot add a line to a log; the `error` hook receives the id unchanged.
 
 The details are in `getDebugMessage()`: `Class in file:line: message` for the wrapped exception and every exception behind it, joined by ` <- `. It is `null` for failures the container detects itself. The original exception is available via `getPrevious()`, and the `error` hook receives it directly. Log these, show end users a generic message.
 
