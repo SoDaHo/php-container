@@ -8,6 +8,9 @@
         "php": "^8.5",
         "psr/container": "^2.0"
     },
+    "provide": {
+        "psr/container-implementation": "2.0"
+    },
     "require-dev": {
         "friendsofphp/php-cs-fixer": "^3.94",
         "phpstan/phpstan": "^2.1",
