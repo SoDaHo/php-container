@@ -75,6 +75,7 @@ class HasTest extends TestCase
     public function testHasReturnsFalseForAliasToMissingClass(): void
     {
         $container = new Container();
+        // @phpstan-ignore argument.type (a typo in the class name, the case the README describes)
         $container->bind(Fixtures\ServiceInterface::class, 'Missing\Implementation');
 
         $this->assertFalse($container->has(Fixtures\ServiceInterface::class));
@@ -96,8 +97,8 @@ class HasTest extends TestCase
     public function testHasReturnsTrueForAliasToDefinition(): void
     {
         $container = new Container();
-        $container->bind(Fixtures\ServiceInterface::class, 'service.custom');
-        $container->set('service.custom', fn () => new Fixtures\ConcreteService());
+        $container->bind(Fixtures\ServiceInterface::class, Fixtures\SecondInterface::class);
+        $container->set(Fixtures\SecondInterface::class, fn () => new Fixtures\ConcreteService());
 
         $this->assertTrue($container->has(Fixtures\ServiceInterface::class));
         $this->assertInstanceOf(Fixtures\ConcreteService::class, $container->get(Fixtures\ServiceInterface::class));

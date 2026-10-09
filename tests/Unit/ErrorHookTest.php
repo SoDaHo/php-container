@@ -124,6 +124,7 @@ class ErrorHookTest extends TestCase
     public function testErrorHookNamesTheMissingClassBehindABinding(): void
     {
         $container = new Container();
+        // @phpstan-ignore argument.type (a typo in the class name, the case the README describes)
         $container->bind(Fixtures\ServiceInterface::class, 'Missing\Implementation');
         $firedErrors = [];
         $container->on('error', function (array $data) use (&$firedErrors) {

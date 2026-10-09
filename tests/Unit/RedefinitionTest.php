@@ -105,8 +105,8 @@ class RedefinitionTest extends TestCase
      */
     public static function redefinitionsOfABinding(): array
     {
-        $bind = fn (Container $c) => $c->bind('needs.logger', 'Missing\Implementation');
-        $set = fn (Container $c) => $c->set('needs.logger', fn () => new \stdClass());
+        $bind = fn (Container $c) => $c->bind(Fixtures\FirstInterface::class, Fixtures\ConcreteService::class);
+        $set = fn (Container $c) => $c->set(Fixtures\FirstInterface::class, fn () => new \stdClass());
 
         return [
             'bind() when the target is announced' => [$bind, Fixtures\NeedsLogger::class],
@@ -124,9 +124,9 @@ class RedefinitionTest extends TestCase
     #[DataProvider('redefinitionsOfABinding')]
     public function testBindingCannotBeRedefinedWhileItsTargetIsBeingCreated(callable $redefine, string $announced): void
     {
-        // 'needs.logger' -> NeedsLogger, which itself gets its logger through another binding
+        // FirstInterface -> NeedsLogger, which itself gets its logger through another binding
         $container = new Container();
-        $container->bind('needs.logger', Fixtures\NeedsLogger::class);
+        $container->bind(Fixtures\FirstInterface::class, Fixtures\NeedsLogger::class);
         $container->bind(Fixtures\LoggerInterface::class, Fixtures\FileLogger::class);
         $container->on('resolve', function (array $data) use ($container, $redefine, $announced) {
             if ($data['id'] === $announced) {
@@ -135,15 +135,18 @@ class RedefinitionTest extends TestCase
         });
 
         try {
-            $container->get('needs.logger');
+            $container->get(Fixtures\FirstInterface::class);
             $this->fail('Expected ContainerException');
         } catch (ContainerException $e) {
-            $this->assertSame("Cannot redefine 'needs.logger': the entry has been created or is being created.", $e->getMessage());
+            $this->assertSame(
+                "Cannot redefine '" . Fixtures\FirstInterface::class . "': the entry has been created or is being created.",
+                $e->getMessage()
+            );
         }
 
         // What get() returns and what has() says stay in step
-        $this->assertTrue($container->has('needs.logger'));
-        $this->assertInstanceOf(Fixtures\NeedsLogger::class, $container->get('needs.logger'));
+        $this->assertTrue($container->has(Fixtures\FirstInterface::class));
+        $this->assertInstanceOf(Fixtures\NeedsLogger::class, $container->get(Fixtures\FirstInterface::class));
     }
 
     public function testErrorHookCannotRedefineTheEntryThatIsFailing(): void
@@ -169,6 +172,7 @@ class RedefinitionTest extends TestCase
     public function testBindingMayBeRedefinedAfterItsTargetFailed(): void
     {
         $container = new Container();
+        // @phpstan-ignore argument.type (a typo in the class name, the case the README describes)
         $container->bind(Fixtures\ServiceInterface::class, 'Missing\Implementation');
 
         try {

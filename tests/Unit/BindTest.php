@@ -86,14 +86,15 @@ class BindTest extends TestCase
     public function testHasFollowsTheLastRegistration(): void
     {
         $container = new Container();
-        $container->set('service', fn () => new Fixtures\ConcreteService());
-        $container->bind('service', 'Missing\Implementation');
+        $container->set(Fixtures\ServiceInterface::class, fn () => new Fixtures\ConcreteService());
+        // An interface without a binding of its own: nothing the container can create
+        $container->bind(Fixtures\ServiceInterface::class, Fixtures\CountableService::class);
 
-        $this->assertFalse($container->has('service'));
+        $this->assertFalse($container->has(Fixtures\ServiceInterface::class));
 
-        $container->set('service', fn () => new Fixtures\ConcreteService());
+        $container->set(Fixtures\ServiceInterface::class, fn () => new Fixtures\ConcreteService());
 
-        $this->assertTrue($container->has('service'));
+        $this->assertTrue($container->has(Fixtures\ServiceInterface::class));
     }
 
     public function testBindingIsInPlaceWhenTheFactoryItReplacesIsDestroyed(): void
@@ -120,20 +121,20 @@ class BindTest extends TestCase
     public function testEveryBindingOnTheWayIsAnEntryOfItsOwn(): void
     {
         $container = new Container();
-        $container->bind('first', 'second');
-        $container->bind('second', Fixtures\ConcreteService::class);
+        $container->bind(Fixtures\FirstInterface::class, Fixtures\SecondInterface::class);
+        $container->bind(Fixtures\SecondInterface::class, Fixtures\ConcreteService::class);
 
-        $service = $container->get('first');
+        $service = $container->get(Fixtures\FirstInterface::class);
 
-        // 'second' was never asked for, but it exists now
+        // SecondInterface was never asked for, but it exists now
         try {
-            $container->bind('second', Fixtures\AlternativeService::class);
+            $container->bind(Fixtures\SecondInterface::class, Fixtures\AlternativeService::class);
             $this->fail('Expected ContainerException');
         } catch (ContainerException $e) {
-            $this->assertStringContainsString("Cannot redefine 'second'", $e->getMessage());
+            $this->assertStringContainsString("Cannot redefine '" . Fixtures\SecondInterface::class . "'", $e->getMessage());
         }
 
-        $this->assertSame($service, $container->get('second'));
+        $this->assertSame($service, $container->get(Fixtures\SecondInterface::class));
         $this->assertSame($service, $container->get(Fixtures\ConcreteService::class));
     }
 

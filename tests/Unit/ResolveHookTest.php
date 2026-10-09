@@ -164,11 +164,11 @@ class ResolveHookTest extends TestCase
             ],
             'interface bound to an id with a factory' => [
                 function (Container $c): void {
-                    $c->bind(Fixtures\ServiceInterface::class, 'custom');
-                    $c->set('custom', fn () => new Fixtures\ConcreteService());
+                    $c->bind(Fixtures\ServiceInterface::class, Fixtures\SecondInterface::class);
+                    $c->set(Fixtures\SecondInterface::class, fn () => new Fixtures\ConcreteService());
                 },
                 Fixtures\ControllerWithInterface::class,
-                'custom',
+                Fixtures\SecondInterface::class,
             ],
         ];
     }
