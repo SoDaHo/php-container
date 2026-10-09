@@ -166,7 +166,7 @@ $container->on('error', function (array $data) {
 
 `error` fires once where the container detects the failure, also when the caller catches the exception: `id` is the entry that could not be created (a missing dependency, not the class that needs it), `exception` is the original exception of a factory or constructor, otherwise the container's own. A factory that fails because an entry it requested failed is reported as well. An `error` hook may use the container, but should catch what `get()` throws there: while an `error` hook runs, further failures are not reported to any `error` hook, and asking for the entry that is just being created fails as a circular dependency. `set()` or `bind()` for that entry throws there, too: register a replacement after `get()` has failed.
 
-Hooks fail hard: the container does not catch an exception thrown inside a hook (inside a `set()` factory it is wrapped like anything else the factory throws). A throwing `error` hook replaces the exception `get()` was about to throw (for a missing dependency: the `NotFoundException` inside the `ContainerException`, if the hook throws a `NotFoundException` itself).
+Hooks fail hard: the container does not catch an exception thrown inside a hook (inside a `set()` factory it is wrapped like anything else the factory throws). An entry whose `resolve` hook throws is not kept, nor are bindings to it the hook asked for: the next `get()` runs the factory or constructor and the hook again, and `set()` or `bind()` for it are accepted until then. A throwing `error` hook replaces the exception `get()` was about to throw (for a missing dependency: the `NotFoundException` inside the `ContainerException`, if the hook throws a `NotFoundException` itself).
 
 ## Security
 

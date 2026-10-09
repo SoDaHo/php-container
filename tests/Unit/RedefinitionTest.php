@@ -128,25 +128,30 @@ class RedefinitionTest extends TestCase
         $container = new Container();
         $container->bind(Fixtures\FirstInterface::class, Fixtures\NeedsLogger::class);
         $container->bind(Fixtures\LoggerInterface::class, Fixtures\FileLogger::class);
-        $container->on('resolve', function (array $data) use ($container, $redefine, $announced) {
+        $announcements = 0;
+        $container->on('resolve', function (array $data) use ($container, $redefine, $announced, &$announcements) {
             if ($data['id'] === $announced) {
+                $announcements++;
                 $redefine($container);
             }
         });
 
-        try {
-            $container->get(Fixtures\FirstInterface::class);
-            $this->fail('Expected ContainerException');
-        } catch (ContainerException $e) {
-            $this->assertSame(
-                "Cannot redefine '" . Fixtures\FirstInterface::class . "': the entry has been created or is being created.",
-                $e->getMessage()
-            );
+        // The hook's exception undoes the announced entry, so the next get() creates it anew and fails the same way
+        foreach ([1, 2] as $attempt) {
+            try {
+                $container->get(Fixtures\FirstInterface::class);
+                $this->fail('Expected ContainerException');
+            } catch (ContainerException $e) {
+                $this->assertSame(
+                    "Cannot redefine '" . Fixtures\FirstInterface::class . "': the entry has been created or is being created.",
+                    $e->getMessage()
+                );
+            }
+            $this->assertSame($attempt, $announcements);
         }
 
-        // What get() returns and what has() says stay in step
+        // What has() says stays true: the binding is in place, only the hook keeps failing
         $this->assertTrue($container->has(Fixtures\FirstInterface::class));
-        $this->assertInstanceOf(Fixtures\NeedsLogger::class, $container->get(Fixtures\FirstInterface::class));
     }
 
     public function testErrorHookCannotRedefineTheEntryThatIsFailing(): void

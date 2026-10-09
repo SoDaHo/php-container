@@ -229,8 +229,42 @@ class Container implements ContainerInterface
         foreach ($defaulted as $type) {
             $this->defaulted[$type][$id] = true;
         }
-        $this->trigger('resolve', ['id' => $id, 'instance' => $instance]);
+
+        // Stored before the hook runs, so that a hook asking for the entry (or an interface bound to it) gets
+        // this instance instead of a circular dependency. A hook that throws undoes the entry.
+        try {
+            $this->trigger('resolve', ['id' => $id, 'instance' => $instance]);
+        } catch (\Throwable $e) {
+            $this->discard($id, $defaulted);
+            throw $e;
+        }
+
         return $instance;
+    }
+
+    /**
+     * Undo an entry whose resolve hook threw: it never passed the hook, the next get() creates it anew.
+     * Bindings to it that the hook asked for go as well. They are found by key, not by value: another
+     * entry may hold the same value (two factories returning 1). The defaults it got are no longer in use.
+     *
+     * @param list<string> $defaulted
+     */
+    private function discard(string $id, array $defaulted): void
+    {
+        unset($this->instances[$id]);
+        foreach (array_keys($this->instances) as $key) {
+            $key = (string) $key;
+            if (isset($this->aliases[$key]) && $this->target($key) === $id) {
+                unset($this->instances[$key]);
+            }
+        }
+
+        foreach ($defaulted as $type) {
+            unset($this->defaulted[$type][$id]);
+            if ($this->defaulted[$type] === []) {
+                unset($this->defaulted[$type]);
+            }
+        }
     }
 
     /**
