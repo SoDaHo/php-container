@@ -75,7 +75,7 @@ class Container implements ContainerInterface
      */
     public static function create(array $config = []): static
     {
-        // @phpstan-ignore new.static (a subclass whose constructor takes other arguments does not use create())
+        // @phpstan-ignore new.static (a subclass whose constructor takes other arguments overrides create() or is created with new)
         return new static($config);
     }
 

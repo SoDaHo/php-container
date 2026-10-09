@@ -21,6 +21,8 @@ The table starts at 1.1.0. Coming from 1.0.x, the changes of 1.1.0 (below) apply
 | `set($id, ...)` followed by `bind($id, ...)` (the definition won) | The binding wins: the last registration counts. Remove the one you do not want. |
 | An optional parameter whose type is bound to a class that is missing or not instantiable, or through a cycle of bindings (got its default) | It throws. Correct the binding or remove it. |
 | A subclass that fires its own events with `trigger()` | List them: `protected const array EVENTS = [...parent::EVENTS, 'boot'];`. A constant `EVENTS` the subclass already has needs another name. |
+| A subclass that overrides `create()` with the return type `self` | PHP stops with a fatal error: the declaration must be compatible with `create(array $config = []): static`. Declare `static`. |
+| `create()` called on a subclass (returned a plain `Container`) | It returns an instance of the subclass, created with `new static([])`. A subclass whose constructor takes other arguments gets a `TypeError`: create it with `new`, or override `create()`. |
 | PHP 8.2, 8.3, 8.4 | PHP 8.5 |
 
 ### Removed
@@ -42,6 +44,10 @@ The table starts at 1.1.0. Coming from 1.0.x, the changes of 1.1.0 (below) apply
 ### Fixed
 
 - A `NotFoundException` thrown by a hook while a class was being autowired was reported as an unresolvable dependency of that class, although the dependency exists.
+
+## [2.0.0-beta.1] - 2026-10-02
+
+Pre-release of 2.0.0 with the same code. 2.0.0 completed this file and the CI workflow.
 
 ## [1.1.0] - 2026-10-02
 
@@ -88,7 +94,7 @@ Only if you use the cache:
 - An optional parameter falls back to its default when its type is an abstract class or an enum, as it already did for an unbound interface.
 - `getDebugMessage()` names the origin of a wrapped factory or constructor exception.
 
-## [1.0.0] - 2026-03-15
+## [1.0.0] - 2026-03-19
 
 - PSR-11 compliant dependency injection container
 - Constructor autowiring via Reflection
@@ -103,3 +109,9 @@ Only if you use the cache:
 - Environment variable configuration (`$_ENV` > `getenv()` fallback)
 - Event hooks (`resolve`, `error`, `cacheHit`, `cacheMiss`)
 - Dual exception messages (user-facing + debug)
+
+[Unreleased]: https://github.com/SoDaHo/php-container/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/SoDaHo/php-container/compare/v1.1.0...v2.0.0
+[2.0.0-beta.1]: https://github.com/SoDaHo/php-container/compare/v1.1.0...v2.0.0-beta.1
+[1.1.0]: https://github.com/SoDaHo/php-container/compare/v1.0.0...v1.1.0
+[1.0.0]: https://github.com/SoDaHo/php-container/releases/tag/v1.0.0
