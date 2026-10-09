@@ -62,13 +62,6 @@ class ServiceWithOptionalDep
     }
 }
 
-class ServiceWithNullableDep
-{
-    public function __construct(public ?NonExistentInterface $dep = null)
-    {
-    }
-}
-
 // ==================== Type Edge Cases ====================
 
 class ServiceWithUnionDefault

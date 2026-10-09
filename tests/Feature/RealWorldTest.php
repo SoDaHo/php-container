@@ -22,7 +22,6 @@ class RealWorldTest extends TestCase
 
         // Bind interfaces to implementations
         $container->bind(Fixtures\LoggerInterface::class, Fixtures\FileLogger::class);
-        $container->bind(Fixtures\CacheInterface::class, Fixtures\ArrayCache::class);
         $container->bind(Fixtures\DatabaseInterface::class, Fixtures\SqliteDatabase::class);
 
         // Manual definition for config-dependent service
@@ -32,12 +31,16 @@ class RealWorldTest extends TestCase
             $c->get(Fixtures\LoggerInterface::class),
         ));
 
-        // Get application
+        // Get application: every registration above is reached on the way
         $app = $container->get(Fixtures\Application::class);
 
-        $this->assertInstanceOf(Fixtures\Application::class, $app);
-        $this->assertInstanceOf(Fixtures\UserController::class, $app->userController);
         $this->assertInstanceOf(Fixtures\FileLogger::class, $app->userController->logger);
+        $this->assertInstanceOf(Fixtures\SqliteDatabase::class, $app->users->database);
+        $this->assertSame('smtp.example.com', $app->mailer->host);
+
+        // One logger for all of them
+        $this->assertSame($app->userController->logger, $app->users->logger);
+        $this->assertSame($app->userController->logger, $app->mailer->logger);
     }
 
     // ==================== PSR-11 Compliance ====================

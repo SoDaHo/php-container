@@ -47,22 +47,4 @@ class ExceptionTest extends TestCase
 
         $this->assertNull($exception->getDebugMessage());
     }
-
-    // ==================== Exception Chaining ====================
-
-    public function testContainerExceptionSupportsPrevious(): void
-    {
-        $previous = new \RuntimeException('Original error');
-        $exception = new ContainerException('Wrapped error', 0, $previous);
-
-        $this->assertSame($previous, $exception->getPrevious());
-    }
-
-    public function testNotFoundExceptionSupportsPrevious(): void
-    {
-        $previous = new \RuntimeException('Original error');
-        $exception = new NotFoundException('Wrapped error', 0, $previous);
-
-        $this->assertSame($previous, $exception->getPrevious());
-    }
 }

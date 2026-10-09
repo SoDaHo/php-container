@@ -134,7 +134,8 @@ class Application
 {
     public function __construct(
         public UserController $userController,
-        public ProductController $productController,
+        public UserService $users,
+        public MailerService $mailer,
     ) {
     }
 }
