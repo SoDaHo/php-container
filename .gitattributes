@@ -6,4 +6,5 @@
 /.php-cs-fixer.dist.php export-ignore
 /phpstan.neon export-ignore
 /phpunit.xml.dist export-ignore
+# The lock pins the tools this repository is developed with; a library is installed by its constraints, not by a lock
 /composer.lock export-ignore
