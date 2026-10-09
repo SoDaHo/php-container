@@ -16,6 +16,14 @@ use Sodaho\Container\Traits\HasHooks;
 /**
  * Lightweight PSR-11 container with autowiring.
  *
+ * Invariants:
+ * - Every entry is created once (a singleton) and stays; only an entry whose resolve hook throws is undone.
+ * - An entry that exists or is being created cannot be redefined, nor can a type an entry got a default for:
+ *   set() and bind() throw instead of registering something that would never be used.
+ * - Every id on a chain of bindings becomes an entry of its own when get() follows the chain.
+ * - has() is true exactly for the ids get() has something to create for; when it is false, get() throws a
+ *   NotFoundException (a cycle of bindings excepted).
+ *
  * Hooks:
  * - 'resolve': Triggered when a new entry is created. Data: ['id' => string, 'instance' => mixed]
  * - 'error': Triggered when get() fails. Data: ['id' => string, 'exception' => Throwable]
@@ -172,13 +180,13 @@ class Container implements ContainerInterface
         $target = $id;
 
         while (true) {
-            // 1. Singleton: Return existing instance
+            // An entry that exists: also reached through a binding that was followed before
             if (array_key_exists($target, $this->instances)) {
                 $instance = $this->instances[$target];
                 break;
             }
 
-            // 2. Manual Definition or 4. Autowiring
+            // The end of the chain: its factory runs or the class is autowired (a class bound to itself is that, too)
             if (!isset($this->aliases[$target]) || $this->aliases[$target] === $target) {
                 $outer = $this->following;
                 $this->following += $aliases;
@@ -190,7 +198,7 @@ class Container implements ContainerInterface
                 break;
             }
 
-            // 3. Alias: Resolve to implementation (bind() mappings)
+            // A binding: follow it, unless it was followed before on this chain (a cycle)
             if (isset($aliases[$target])) {
                 throw $this->fail($id, $this->circular([...array_keys($aliases), $target]));
             }
@@ -198,6 +206,7 @@ class Container implements ContainerInterface
             $target = $this->aliases[$target];
         }
 
+        // Every binding on the way is an entry from now on, so it can no longer be redefined either
         foreach ($aliases as $alias => $_) {
             $this->instances[$alias] = $instance;
         }
@@ -372,6 +381,10 @@ class Container implements ContainerInterface
         return implode(' <- ', $chain);
     }
 
+    /**
+     * Run a set() factory. Whatever it throws is wrapped, so that get() throws a ContainerException as PSR-11
+     * asks; the message names the entry only, the text of the cause goes to the debug message.
+     */
     private function runFactory(string $id, callable $factory): mixed
     {
         try {
@@ -388,6 +401,9 @@ class Container implements ContainerInterface
     }
 
     /**
+     * Autowire a class: every constructor parameter is checked first, then the dependencies are created in
+     * parameter order and the class is instantiated. Nothing is created when a parameter cannot be filled.
+     *
      * @param list<string> $defaulted Filled with the types of the parameters that got their default
      *
      * @param-out list<string> $defaulted
@@ -526,6 +542,10 @@ class Container implements ContainerInterface
         }
     }
 
+    /**
+     * Wrap what a constructor or a default value threw, and report it to the error hook where it happened:
+     * the hook gets the original, get() throws a ContainerException that names the class only.
+     */
     private function instantiationFailed(string $id, \Throwable $e): ContainerException
     {
         $this->report($id, $e);
