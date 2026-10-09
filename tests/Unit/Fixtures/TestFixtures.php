@@ -447,3 +447,13 @@ class ServiceNeedingAbstract
     {
     }
 }
+
+// ==================== A Class That Would Have Got a Default, Had It Been Created ====================
+
+class ServiceWithOptionalInterfaceThatThrows
+{
+    public function __construct(public ?ServiceInterface $service = null)
+    {
+        throw new \RuntimeException('Constructor failed intentionally');
+    }
+}

@@ -44,6 +44,9 @@ class Container implements ContainerInterface
     /** @var array<string, true> Bindings get() is following to an entry that is being created */
     private array $following = [];
 
+    /** @var array<string, array<string, true>> Types a created entry got a default for instead: type -> those entries */
+    private array $defaulted = [];
+
     private bool $reportingError = false;
 
     /**
@@ -138,6 +141,12 @@ class Container implements ContainerInterface
         if (array_key_exists($id, $this->instances) || isset($this->resolving[$id]) || isset($this->following[$id])) {
             throw new ContainerException("Cannot redefine '$id': the entry has been created or is being created.");
         }
+
+        // An entry that got a default for this type would keep it: the definition would reach it as little
+        if (isset($this->defaulted[$id])) {
+            $entry = array_key_first($this->defaulted[$id]);
+            throw new ContainerException("Cannot define '$id': '$entry' has been created with the default value in its place.");
+        }
     }
 
     /**
@@ -205,15 +214,21 @@ class Container implements ContainerInterface
         }
 
         $this->resolving[$id] = true;
+        $defaulted = [];
         try {
             $instance = isset($this->definitions[$id])
                 ? $this->runFactory($id, $this->definitions[$id])
-                : $this->resolve($id);
+                : $this->resolve($id, $defaulted);
         } finally {
             unset($this->resolving[$id]);
         }
 
+        // The defaults the entry got count from the moment the entry exists, not before: a get() that
+        // failed has used none, and the types stay open for a definition.
         $this->instances[$id] = $instance;
+        foreach ($defaulted as $type) {
+            $this->defaulted[$type][$id] = true;
+        }
         $this->trigger('resolve', ['id' => $id, 'instance' => $instance]);
         return $instance;
     }
@@ -319,7 +334,12 @@ class Container implements ContainerInterface
         }
     }
 
-    private function resolve(string $id): object
+    /**
+     * @param list<string> $defaulted Filled with the types of the parameters that got their default
+     *
+     * @param-out list<string> $defaulted
+     */
+    private function resolve(string $id, array &$defaulted): object
     {
         if (!class_exists($id)) {
             // An interface gets here when nothing is bound to it
@@ -358,6 +378,9 @@ class Container implements ContainerInterface
             // No class dependency, or an optional one nothing is bound to and the container cannot create: the default
             if ($depId === null || ($param->isOptional() && !isset($this->aliases[$depId]) && !$this->has($depId))) {
                 $arguments[] = $this->defaultValue($id, $param);
+                if ($depId !== null) {
+                    $defaulted[] = $depId;
+                }
                 continue;
             }
 

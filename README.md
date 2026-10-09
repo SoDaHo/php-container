@@ -67,7 +67,7 @@ $container->set(Database::class, fn(Container $c) => new Database(
 $container->set('app.name', fn() => 'My Application');
 ```
 
-The last `set()` or `bind()` for an id wins. Register definitions and bindings before the first `get()` that reaches the id, directly, through a binding or as a dependency. Entries are singletons: a `set()` or `bind()` for an entry that has been created or is just being created throws a `ContainerException`.
+The last `set()` or `bind()` for an id wins. Register definitions and bindings before the first `get()` that reaches the id, directly, through a binding or as a dependency. Entries are singletons: a `set()` or `bind()` for an entry that has been created or is just being created throws a `ContainerException`. So does one for a type an entry was created with the default value for (see Optional Dependencies).
 
 ### Interface Binding
 
@@ -119,6 +119,8 @@ class Mailer {
 ```
 
 A concrete class that exists but cannot be built (for example because it needs a string) is a wiring error and throws, default or not.
+
+Once an entry has been created with the default, `set()` and `bind()` for that type throw a `ContainerException`: the entry would keep its default and never see the definition. Register them before the first `get()`.
 
 ### Static Analysis
 
