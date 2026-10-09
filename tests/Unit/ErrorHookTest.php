@@ -63,12 +63,12 @@ class ErrorHookTest extends TestCase
     {
         return [
             'class not found' => ['Missing\Service', 'Missing\Service', NotFoundException::class, 'not found'],
-            'unbound interface' => [Fixtures\ServiceInterface::class, Fixtures\ServiceInterface::class, NotFoundException::class, 'not found'],
-            'abstract class' => [Fixtures\AbstractService::class, Fixtures\AbstractService::class, ContainerException::class, 'not instantiable'],
+            'unbound interface' => [Fixtures\ServiceInterface::class, Fixtures\ServiceInterface::class, NotFoundException::class, 'no implementation is bound'],
+            'abstract class' => [Fixtures\AbstractService::class, Fixtures\AbstractService::class, NotFoundException::class, 'not instantiable: it is abstract'],
             'circular' => [Fixtures\CircularA::class, Fixtures\CircularA::class, ContainerException::class, 'Circular dependency detected'],
             'variadic' => [Fixtures\ServiceWithVariadic::class, Fixtures\ServiceWithVariadic::class, ContainerException::class, 'variadic parameter'],
-            'no type' => [Fixtures\ServiceWithNoTypeNoDefault::class, Fixtures\ServiceWithNoTypeNoDefault::class, ContainerException::class, 'No type hint'],
-            'union type' => [Fixtures\ServiceWithUnionNoDefault::class, Fixtures\ServiceWithUnionNoDefault::class, ContainerException::class, 'No type hint'],
+            'no type' => [Fixtures\ServiceWithNoTypeNoDefault::class, Fixtures\ServiceWithNoTypeNoDefault::class, ContainerException::class, 'it has no type'],
+            'union type' => [Fixtures\ServiceWithUnionNoDefault::class, Fixtures\ServiceWithUnionNoDefault::class, ContainerException::class, 'it has a union type'],
             'primitive' => [Fixtures\ServiceWithConfig::class, Fixtures\ServiceWithConfig::class, ContainerException::class, 'primitive parameter'],
             // Reported where it happens: for the dependency that is missing, not for the class that needs it
             'missing dependency' => [Fixtures\ControllerWithInterface::class, Fixtures\ServiceInterface::class, NotFoundException::class, 'not found'],

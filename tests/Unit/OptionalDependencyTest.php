@@ -67,9 +67,10 @@ class OptionalDependencyTest extends TestCase
                 [Fixtures\ServiceInterface::class => 'Missing\\Typo'],
                 "Cannot resolve dependency '" . Fixtures\ServiceInterface::class . "' for parameter 'service'",
             ],
+            // The abstract class is named by the NotFoundException in getPrevious()
             'abstract class' => [
                 [Fixtures\ServiceInterface::class => Fixtures\AbstractService::class],
-                "Class '" . Fixtures\AbstractService::class . "' is not instantiable",
+                "Cannot resolve dependency '" . Fixtures\ServiceInterface::class . "' for parameter 'service'",
             ],
             'cycle' => [
                 [Fixtures\ServiceInterface::class => Fixtures\FirstInterface::class, Fixtures\FirstInterface::class => Fixtures\ServiceInterface::class],

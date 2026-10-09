@@ -431,3 +431,19 @@ class ServiceWithOptionalMissingClass
     {
     }
 }
+
+// ==================== Classes That Cannot Be Instantiated ====================
+
+class ServiceWithPrivateConstructor
+{
+    private function __construct()
+    {
+    }
+}
+
+class ServiceNeedingAbstract
+{
+    public function __construct(public AbstractService $service)
+    {
+    }
+}

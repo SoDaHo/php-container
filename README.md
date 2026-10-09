@@ -190,16 +190,18 @@ use Sodaho\Container\Exception\NotFoundException;
 try {
     $service = $container->get(SomeService::class);
 } catch (NotFoundException $e) {
-    // Class or service not found
+    // Nothing the container can create for this id (has() is false)
 } catch (ContainerException $e) {
-    // Any other container error (not instantiable, unresolvable parameter, etc.)
+    // Any other container error (unresolvable parameter, missing dependency, etc.)
 }
 ```
 
 | Exception | When |
 |-----------|------|
-| `NotFoundException` | Class doesn't exist or service not defined |
-| `ContainerException` | `get()`: class not instantiable, unresolvable parameter, factory or constructor error, circular dependency (through constructors, bindings or factories). `set()` / `bind()`: the entry has been created or is being created. `on()`: unknown event. Constructor and `create()`: a config array that is not empty. |
+| `NotFoundException` | `get()` for an id `has()` is false for: no such class or service, an interface without binding, a class that cannot be instantiated (abstract, an enum, constructor not public), also at the end of a binding. A cycle of bindings is the exception: `has()` is false, `get()` throws a `ContainerException`. |
+| `ContainerException` | `get()`: unresolvable parameter, a dependency the container cannot create (the `NotFoundException` is in `getPrevious()`), factory or constructor error, circular dependency (through constructors, bindings or factories). `set()` / `bind()`: the entry has been created or is being created. `on()`: unknown event. Constructor and `create()`: a config array that is not empty. |
+
+`NotFoundException` extends `ContainerException`: catching `ContainerException` catches both.
 
 An exception thrown while a class is loaded (by an autoloader, or a syntax error in the class file) is not the container's: `get()` and `has()` let it pass unchanged.
 

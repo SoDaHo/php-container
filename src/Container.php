@@ -8,6 +8,7 @@ use Psr\Container\ContainerInterface;
 use ReflectionClass;
 use ReflectionNamedType;
 use ReflectionParameter;
+use ReflectionUnionType;
 use Sodaho\Container\Exception\ContainerException;
 use Sodaho\Container\Exception\NotFoundException;
 use Sodaho\Container\Traits\HasHooks;
@@ -321,13 +322,23 @@ class Container implements ContainerInterface
     private function resolve(string $id): object
     {
         if (!class_exists($id)) {
-            throw $this->fail($id, new NotFoundException("Class or service '$id' not found."));
+            // An interface gets here when nothing is bound to it
+            $message = interface_exists($id)
+                ? "Interface '$id' not found: no implementation is bound to it."
+                : "Class or service '$id' not found.";
+            throw $this->fail($id, new NotFoundException($message));
         }
 
         $reflector = new ReflectionClass($id);
 
+        // has() is false for a class that cannot be instantiated: for PSR-11 that is "not found", too
         if (!$reflector->isInstantiable()) {
-            throw $this->fail($id, new ContainerException("Class '$id' is not instantiable (abstract or interface)."));
+            $reason = match (true) {
+                $reflector->isEnum() => 'it is an enum',
+                $reflector->isAbstract() => 'it is abstract',
+                default => 'its constructor is not public',
+            };
+            throw $this->fail($id, new NotFoundException("Class '$id' is not instantiable: $reason."));
         }
 
         $parameters = $reflector->getConstructor()?->getParameters() ?? [];
@@ -350,10 +361,10 @@ class Container implements ContainerInterface
                 continue;
             }
 
-            // A class that does not exist is "not found" for whoever asks for it, but an error of the class
-            // that needs it. Judged before get() runs: if the class is there, a NotFoundException is a hook's.
-            $target = $this->target($depId);
-            $missing = $target !== null && !isset($this->definitions[$target]) && !class_exists($target);
+            // A dependency has() is false for is "not found" for whoever asks for it, but an error of the class
+            // that needs it: has() is true for that class, so its get() must not throw a NotFoundException.
+            // Judged before get() runs: if has() is true for the dependency, a NotFoundException is a hook's.
+            $missing = !$this->has($depId);
 
             try {
                 $arguments[] = $this->get($depId);
@@ -394,8 +405,13 @@ class Container implements ContainerInterface
         // No type hint, Union Types or Intersection Types (not supported for simplicity)
         if (!$type instanceof ReflectionNamedType) {
             if (!$param->isDefaultValueAvailable()) {
+                $kind = match (true) {
+                    $type === null => 'no type',
+                    $type instanceof ReflectionUnionType => 'a union type',
+                    default => 'an intersection type',
+                };
                 throw $this->fail($id, new ContainerException(
-                    "Cannot resolve parameter '{$param->getName()}' in class '$id'. No type hint, union type, or intersection type. Use set() to define this service manually."
+                    "Cannot resolve parameter '{$param->getName()}' in class '$id': it has $kind. Use set() to define this service manually."
                 ));
             }
             return null;

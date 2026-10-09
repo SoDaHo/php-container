@@ -74,7 +74,7 @@ class AutowiringTest extends TestCase
         $container = new Container();
 
         $this->expectException(ContainerException::class);
-        $this->expectExceptionMessage('union type, or intersection type');
+        $this->expectExceptionMessage("': it has a union type.");
 
         $container->get(Fixtures\ServiceWithUnionNoDefault::class);
     }
@@ -84,7 +84,7 @@ class AutowiringTest extends TestCase
         $container = new Container();
 
         $this->expectException(ContainerException::class);
-        $this->expectExceptionMessage('intersection type');
+        $this->expectExceptionMessage("': it has an intersection type.");
 
         $container->get(Fixtures\ServiceWithIntersectionNoDefault::class);
     }
@@ -110,7 +110,7 @@ class AutowiringTest extends TestCase
         $container = new Container();
 
         $this->expectException(ContainerException::class);
-        $this->expectExceptionMessage('union type, or intersection type');
+        $this->expectExceptionMessage("': it has no type.");
 
         $container->get(Fixtures\ServiceWithNoTypeNoDefault::class);
     }
@@ -143,8 +143,8 @@ class AutowiringTest extends TestCase
     {
         $container = new Container();
 
-        $this->expectException(ContainerException::class);
-        $this->expectExceptionMessage('not instantiable');
+        $this->expectException(NotFoundException::class);
+        $this->expectExceptionMessage('is not instantiable: it is abstract.');
 
         $container->get(Fixtures\AbstractService::class);
     }
