@@ -103,7 +103,7 @@ $logger2 = $container->get(Logger::class);
 $logger1 === $logger2; // true - same instance
 ```
 
-The id is used as given: `Logger::class`, `'\\' . Logger::class` and a differently cased spelling are three entries. Use `::class`.
+The id is used as given: `Logger::class`, `'\\' . Logger::class` and a differently cased spelling are three entries. Use `::class`. Constructor parameter types are different: a type written in another case than the class is declared still gets the entry, binding or factory of that class.
 
 ### Optional Dependencies
 

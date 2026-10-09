@@ -405,3 +405,29 @@ class ContainerWithBootEvent extends \Sodaho\Container\Container
         $this->trigger('boot', ['container' => $this]);
     }
 }
+
+// ==================== Types Written Other Than the Class Is Declared ====================
+
+class ServiceWithLowercaseType
+{
+    // @phpstan-ignore class.nameCase, class.nameCase (written in another case on purpose: parameter and property)
+    public function __construct(public testservice $service)
+    {
+    }
+}
+
+class ServiceWithOptionalLowercaseInterface
+{
+    // @phpstan-ignore interface.nameCase, interface.nameCase (written in another case on purpose: parameter and property)
+    public function __construct(public ?serviceinterface $service = null)
+    {
+    }
+}
+
+class ServiceWithOptionalMissingClass
+{
+    // @phpstan-ignore class.notFound, class.notFound (missing on purpose: parameter and property)
+    public function __construct(public ?\Missing\Thing $thing = null)
+    {
+    }
+}

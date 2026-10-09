@@ -411,8 +411,15 @@ class Container implements ContainerInterface
             return null;
         }
 
-        // It's a class/interface dependency
-        return $type->getName();
+        // A class or interface, named as declared: a type may spell it in another case, and only the declared
+        // name reaches the entry, binding or factory registered under ::class. A name that does not exist (or
+        // self) stays as written; the guard keeps ReflectionClass from throwing for an optional dependency.
+        $name = $type->getName();
+        if (class_exists($name) || interface_exists($name)) {
+            return new ReflectionClass($name)->name;
+        }
+
+        return $name;
     }
 
     /**
