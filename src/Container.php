@@ -158,12 +158,14 @@ class Container implements ContainerInterface
      */
     private static function assertBindable(string $interface, string $implementation): void
     {
+        // The implementation is loaded first: loading it loads the interfaces it implements, so an interface written
+        // in another case is found even where the autoloader would not find it under that spelling
+        $declaredImplementation = self::declared($implementation);
         $declared = self::declared($interface);
         if ($declared !== null && $declared !== $interface) {
             throw new ContainerException('Cannot bind \'' . self::name($interface) . "': name it as declared, '" . self::name($declared) . "'.");
         }
 
-        $declaredImplementation = self::declared($implementation);
         if ($declaredImplementation === null) {
             return;
         }

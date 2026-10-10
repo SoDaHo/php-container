@@ -45,6 +45,35 @@ class BindCheckTest extends TestCase
         $container->bind(Fixtures\SecondInterface::class, Fixtures\FirstInterface::class);
     }
 
+    public function testInterfaceInAnotherCaseIsRejectedAlsoWhenItWasNotLoaded(): void
+    {
+        // An autoloader that finds a class under its declared name only, like PSR-4 on a case-sensitive file system:
+        // the interface in another case is found once the implementation, which implements it, is loaded
+        $files = [
+            Fixtures\LateLoaded\LateBoundInterface::class => 'late_bound_interface.php',
+            Fixtures\LateLoaded\LateBoundImplementation::class => 'late_bound_implementation.php',
+        ];
+        $load = static function (string $class) use ($files): void {
+            if (isset($files[$class])) {
+                require __DIR__ . '/Fixtures/LateLoaded/' . $files[$class];
+            }
+        };
+        spl_autoload_register($load);
+
+        try {
+            $this->assertFalse(interface_exists(Fixtures\LateLoaded\LateBoundInterface::class, false));
+            $interface = strtolower(Fixtures\LateLoaded\LateBoundInterface::class);
+
+            $this->expectException(ContainerException::class);
+            $this->expectExceptionMessage(
+                "Cannot bind '$interface': name it as declared, '" . Fixtures\LateLoaded\LateBoundInterface::class . "'."
+            );
+            new Container()->bind($interface, Fixtures\LateLoaded\LateBoundImplementation::class);
+        } finally {
+            spl_autoload_unregister($load);
+        }
+    }
+
     public function testImplementationWrittenOtherwiseThanDeclaredIsRejected(): void
     {
         $container = new Container();
