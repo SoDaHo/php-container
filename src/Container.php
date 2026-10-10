@@ -17,7 +17,8 @@ use Sodaho\Container\Traits\HasHooks;
  * Lightweight PSR-11 container with autowiring.
  *
  * Invariants:
- * - Every entry is created once (a singleton) and stays; only an entry whose resolve hook throws is undone.
+ * - An entry is kept once it is created (a singleton). Only an entry whose resolve hook throws is undone, with every
+ *   entry created while that hook ran; the next get() creates them anew, so their constructors run again.
  * - Nothing can be registered while get() runs; an entry that exists cannot be redefined, nor can a type an entry
  *   got a default for: set() and bind() throw instead of registering something that would never be used.
  * - Every id on a chain of bindings becomes an entry of its own when get() follows the chain.
@@ -159,7 +160,7 @@ class Container implements ContainerInterface
 
         // An entry that got a default for this type would keep it: the definition would reach it as little
         if (isset($this->defaulted[$id])) {
-            // Never empty: discard() removes a type together with its last entry
+            // Never empty: forget() removes a type together with its last entry
             $entry = (string) array_key_first($this->defaulted[$id]);
             throw new ContainerException(
                 'Cannot define \'' . self::name($id) . "': '" . self::name($entry) . "' has been created with the default value in its place."
@@ -240,28 +241,27 @@ class Container implements ContainerInterface
         }
 
         $this->resolving[$id] = true;
-        $defaulted = [];
         try {
             $instance = isset($this->definitions[$id])
                 ? $this->runFactory($id, $this->definitions[$id])
-                : $this->autowire($id, $defaulted);
+                : $this->autowire($id);
+        } catch (\Throwable $e) {
+            // Nothing was created: the defaults autowire() marked for the entry are not in use
+            $this->forget([$id]);
+            throw $e;
         } finally {
             unset($this->resolving[$id]);
         }
 
-        // The defaults the entry got count from the moment the entry exists, not before: a get() that
-        // failed has used none, and the types stay open for a definition.
-        $this->instances[$id] = $instance;
-        foreach ($defaulted as $type) {
-            $this->defaulted[$type][$id] = true;
-        }
-
         // Stored before the hook runs, so that a hook asking for the entry (or an interface bound to it) gets
-        // this instance instead of a circular dependency. A hook that throws undoes the entry.
+        // this instance instead of a circular dependency. Entries are only ever appended, so the entries a hook
+        // creates come after the mark: a hook that throws undoes the entry and all of them.
+        $mark = count($this->instances);
+        $this->instances[$id] = $instance;
         try {
             $this->trigger('resolve', ['id' => $id, 'instance' => $instance]);
         } catch (\Throwable $e) {
-            $this->discard($id, $defaulted);
+            $this->rollback($mark);
             throw $e;
         }
 
@@ -269,26 +269,33 @@ class Container implements ContainerInterface
     }
 
     /**
-     * Undo an entry whose resolve hook threw: it never passed the hook, the next get() creates it anew.
-     * Bindings to it that the hook asked for go as well. They are found by key, not by value: another
-     * entry may hold the same value (two factories returning 1). The defaults it got are no longer in use.
-     *
-     * @param list<string> $defaulted
+     * Undo an entry whose resolve hook threw, with every entry created after it while the hook ran: the entry never
+     * passed the hook, and an entry the hook created may hold it (a class that needs it, a binding to it, a factory
+     * that asked for it). Keeping those would leave two instances once the next get() creates the entry anew. Entries
+     * created before it, its dependencies among them, passed their own hooks and stay.
      */
-    private function discard(string $id, array $defaulted): void
+    private function rollback(int $mark): void
     {
-        unset($this->instances[$id]);
-        foreach (array_keys($this->instances) as $key) {
-            $key = (string) $key;
-            if (isset($this->aliases[$key]) && $this->target($key) === $id) {
-                unset($this->instances[$key]);
-            }
-        }
+        $undone = array_slice($this->instances, $mark, null, true);
+        $this->instances = array_slice($this->instances, 0, $mark, true);
+        $this->forget(array_keys($undone));
+    }
 
-        foreach ($defaulted as $type) {
-            unset($this->defaulted[$type][$id]);
-            if ($this->defaulted[$type] === []) {
+    /**
+     * Drop the defaults the given entries were given: the entries are gone, so a type is open again for a definition
+     * unless another entry got the default as well.
+     *
+     * @param list<int|string> $entries
+     */
+    private function forget(array $entries): void
+    {
+        $gone = array_flip($entries);
+        foreach ($this->defaulted as $type => $users) {
+            $users = array_diff_key($users, $gone);
+            if ($users === []) {
                 unset($this->defaulted[$type]);
+            } else {
+                $this->defaulted[$type] = $users;
             }
         }
     }
@@ -418,11 +425,10 @@ class Container implements ContainerInterface
      * Autowire a class: every constructor parameter is checked first, then the dependencies are created in
      * parameter order and the class is instantiated. Nothing is created when a parameter cannot be filled.
      *
-     * @param list<string> $defaulted Filled with the types of the parameters that got their default, each once
-     *
-     * @param-out list<string> $defaulted
+     * A type a parameter gets the default for is marked for the entry at once (make() drops the mark if the entry
+     * is not created): a definition for that type would never reach the entry.
      */
-    private function autowire(string $id, array &$defaulted): object
+    private function autowire(string $id): object
     {
         if (!class_exists($id)) {
             // An interface gets here when nothing is bound to it
@@ -461,9 +467,8 @@ class Container implements ContainerInterface
             // No class dependency, or an optional one nothing is bound to and the container cannot create: the default
             if ($depId === null || ($param->isOptional() && !isset($this->aliases[$depId]) && !$this->has($depId))) {
                 $arguments[] = $this->defaultValue($id, $param);
-                // Each type once, however many parameters it has: discard() removes it once
-                if ($depId !== null && !in_array($depId, $defaulted, true)) {
-                    $defaulted[] = $depId;
+                if ($depId !== null) {
+                    $this->defaulted[$depId][$id] = true;
                 }
                 continue;
             }
