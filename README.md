@@ -175,14 +175,14 @@ The container fires events at key points, allowing you to add logging, monitorin
 ```php
 $container = new Container();
 
-// Log all resolved services
+// Log all resolved services; json_encode() escapes what an id could break a log line with
 $container->on('resolve', function (array $data) {
-    error_log("Resolved: {$data['id']}");
+    error_log('Resolved: ' . json_encode($data['id']));
 });
 
-// Log errors
+// Log errors: the class of the exception, not its message, which may quote a connection string
 $container->on('error', function (array $data) {
-    error_log("Container error for {$data['id']}: " . $data['exception']->getMessage());
+    error_log('Container error: ' . json_encode(['id' => $data['id'], 'exception' => $data['exception']::class]));
 });
 ```
 
@@ -198,13 +198,15 @@ A throwing `error` hook (a log sink that is down) does not hide the failure: `ge
 
 ### Never Pass User Input to `get()` or `has()`
 
-`get($id)` creates any autoloadable class whose constructor it can satisfy, and runs that constructor. An id taken from a request (a route parameter, a query string) lets the caller choose the class. Map user input to a fixed list of ids yourself.
+`get($id)` creates any autoloadable class whose constructor it can satisfy, and runs that constructor. An id taken from a request (a route parameter, a query string) lets the caller choose the class. `has($id)` is no allowlist either: it runs the autoloader for the id (the code at the top of a class file runs) and tells whether such a class exists. Map user input to a fixed list of ids yourself.
 
 ### Exception Messages
 
-`getMessage()` names ids, classes and parameters, and nothing else. When a factory or constructor throws, the container's message says which entry failed, not what the exception said: that text may contain connection strings or paths. Control characters in an id are escaped there (a line break shows as `\x0A`), so an id cannot add a line to a log; the `error` hook receives the id unchanged.
+`getMessage()` names ids, classes and parameters, and nothing else. When a factory or constructor throws, the container's message says which entry failed, not what the exception said: that text may contain connection strings or paths. ASCII control characters in an id are escaped there (a line break shows as `\x0A`), so a line break in an id does not start a new line. Other characters pass unchanged, among them the Unicode line separators U+2028, U+2029 and U+0085, which some log readers split lines at: write log lines with `json_encode()` (as in the hook example above) or a structured logger. The `error` hook receives the id unchanged.
 
-The details are in `getDebugMessage()`: `Class in file:line: message` for the wrapped exception and every exception behind it, joined by ` <- `. It is `null` for failures the container detects itself, unless the `error` hook threw while they were reported. The original exception is available via `getPrevious()`, and the `error` hook receives it directly, unchanged: its message, and its trace with the arguments of every call unless `zend.exception_ignore_args` is on (it is in `php.ini-production`, not in development). Log these, show end users a generic message.
+The details are in `getDebugMessage()`: `Class in file:line: message` for the wrapped exception and every exception behind it, joined by ` <- `. It is `null` for failures the container detects itself, unless the `error` hook threw while they were reported. The original exception is available via `getPrevious()`, and the `error` hook receives it directly, unchanged: its message, and its trace with the arguments of every call unless `zend.exception_ignore_args` is on (it is in `php.ini-production`, not in development, nor without a `php.ini`, as in the official Docker images). Log these, show end users a generic message.
+
+Casting an exception to a string (`(string) $e`, which many loggers and error pages do) appends every exception in `getPrevious()` with its message and trace: what `getMessage()` keeps out comes back. Treat that string like the debug message.
 
 ## Exceptions
 
@@ -248,12 +250,14 @@ The container is intentionally minimal:
 | Intersection types | Default only | Use `set()` for manual definition |
 | Attributes | Not supported | Use `set()` for configuration |
 | Tagged services | Not supported | Not needed for simple DI |
-| Lazy objects | Not built in | PHP's own lazy objects (8.4) in a `set()` factory |
+| Lazy objects | Not built in | PHP's own lazy objects (8.4) in a `set()` factory (see below) |
 | Compiler passes | Not supported | Framework territory |
+
+A lazy object from a `set()` factory (`ReflectionClass::newLazyProxy()`) is created by `get()`, but its initializer runs later, when the object is first used. What the initializer throws arrives there, unwrapped and not reported to the `error` hook, and the entry stays: the next use runs the initializer again.
 
 ### Concurrency and Copies
 
-A container is meant for one request at a time. Fibers or coroutines that share one see each other's entries in creation: a second `get()` of an entry the first has not finished yet fails as a circular dependency, and `set()` or `bind()` throws while another one is inside `get()`. Use one container per request or coroutine, or create the shared entries before they start.
+A container is meant for one request at a time. Fibers or coroutines that share one see each other's entries in creation: a second `get()` of an entry the first has not finished yet fails as a circular dependency (once the entry exists and only its `resolve` hook runs, it returns the entry), and `set()` or `bind()` throws while another one is inside `get()`. Use one container per request or coroutine, or create the shared entries before they start.
 
 `clone $container` copies the registrations and shares the entries created so far; entries created afterwards exist once in each copy. Hooks that captured the original container (`use ($container)`) keep using the original; factories get the container that runs them.
 

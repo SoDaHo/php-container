@@ -33,13 +33,16 @@ Nothing to change for code that registers everything before the first `get()` an
 | `set()` or `bind()` for a type, after an entry was created with the default value of a parameter of that type, was accepted and had no effect on that entry | It throws a `ContainerException`. Register the definition before the first `get()`. |
 | A `resolve` hook that threw left the entry in place: the next `get()` returned it without running the hook | The entry is undone: the next `get()` runs the factory or constructor and the hook again. |
 
+### Changed
+
+- `get()` throws a `NotFoundException` for every id `has()` is false for, as PSR-11 requires: also for an abstract class, an enum, a class whose constructor is not public, and a binding that ends at one of them. It threw a plain `ContainerException` for those. A class that needs such a dependency throws a `ContainerException` with the `NotFoundException` in `getPrevious()`, so its message names the dependency, not the class at the end of the binding. A cycle of bindings still throws a `ContainerException` while `has()` is false.
+- `set()` or `bind()` for a type an entry was created with the default value for throws a `ContainerException`. It was accepted, and the entry kept its default (often `null`) without notice.
+
 ### Fixed
 
-- `get()` throws a `NotFoundException` for every id `has()` is false for, as PSR-11 requires: also for an abstract class, an enum, a class whose constructor is not public, and a binding that ends at one of them. A class that needs such a dependency throws a `ContainerException` with the `NotFoundException` in `getPrevious()`, so its message names the dependency, not the class at the end of the binding. A cycle of bindings still throws a `ContainerException` while `has()` is false.
-- `set()` or `bind()` for a type an entry was created with the default value for throws a `ContainerException`. It was accepted, and the entry kept its default (often `null`) without notice.
 - An entry whose `resolve` hook throws is undone, with the bindings to it that the hook asked for and the defaults it got (each type once, also when several parameters share it). It used to stay: the next `get()` returned an instance that never passed the hook, and `set()` for it threw.
 - A constructor parameter whose type writes the class in another case than it is declared gets the entry, binding or factory of that class. It got an entry of its own, past the factory.
-- Control characters in an id are escaped in exception messages (a line break shows as `\x0A`), so an id cannot add a line to a log. The `error` hook receives the id unchanged.
+- ASCII control characters in an id are escaped in exception messages (a line break shows as `\x0A`), so a line break in an id does not start a new line; Unicode line separators pass unchanged (see 2.1.0). The `error` hook receives the id unchanged.
 - Messages say why an entry cannot be created: `Class 'X' is not instantiable: it is abstract.` (also `it is an enum`, `its constructor is not public`; was `(abstract or interface)`), `Interface 'X' not found: no implementation is bound to it.`, `Cannot resolve parameter 'p' in class 'X': it has no type.` (also `a union type`, `an intersection type`).
 - `composer.json` declares that the package provides `psr/container-implementation`.
 
@@ -47,6 +50,13 @@ Nothing to change for code that registers everything before the first `get()` an
 
 - README: `has()`, the order of the `resolve` hook (dependencies first), PHP's own lazy objects, what `getPrevious()` and the `error` hook carry (and `zend.exception_ignore_args`), that a `resolve` hook's exception is not reported to the `error` hook, fibers sharing a container, `clone`.
 - CHANGELOG: the `create()` breaks for 1.x subclasses in the upgrade table of 2.0.0, 2.0.0-beta.1, the date of 1.0.0, comparison links.
+
+### Internal
+
+- `composer.lock` is committed (and left out of the package archive), `composer validate --strict` runs in CI.
+- CI runs every check from one job: the tests on PHP 8.5, on the PHP 8.6 pre-release (allowed to fail) and with the lowest dependencies, PHPStan and the code style. PHPUnit 12 and 13 are allowed besides 11.
+- PHPStan analyses `src` and every test at level max.
+- The tests are split into files by topic; tests that proved nothing are gone.
 
 ## [2.0.0] - 2026-10-03
 

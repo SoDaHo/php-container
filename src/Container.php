@@ -495,7 +495,9 @@ class Container implements ContainerInterface
 
     /**
      * Autowire a class: every constructor parameter is checked first, then the dependencies are created in
-     * parameter order and the class is instantiated. Nothing is created when a parameter cannot be filled.
+     * parameter order and the class is instantiated. Nothing is created when a parameter is of a kind the container
+     * cannot fill (no type, a primitive, a variadic, another union); a dependency that fails to be created after
+     * others were stays a failure of its own, and those others stay entries.
      *
      * A type a parameter gets the default for is marked for the entry at once (make() drops the mark if the entry
      * is not created): a definition for that type would never reach the entry.
