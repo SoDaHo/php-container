@@ -22,8 +22,8 @@ use Sodaho\Container\Traits\HasHooks;
  * - Nothing can be registered while get() runs; an entry that exists cannot be redefined, nor can a type an entry
  *   got a default for: set() and bind() throw instead of registering something that would never be used.
  * - Every id on a chain of bindings becomes an entry of its own when get() follows the chain.
- * - has() is true exactly for the ids get() has something to create for; when it is false, get() throws a
- *   NotFoundException (a cycle of bindings excepted).
+ * - has() is true for the ids get() has something to create for, and for an id on a cycle of bindings (known, but
+ *   broken: get() throws a ContainerException); when has() is false, get() throws a NotFoundException.
  *
  * Hooks:
  * - 'resolve': Triggered when a new entry is created. Data: ['id' => string, 'instance' => mixed]
@@ -314,14 +314,16 @@ class Container implements ContainerInterface
     }
 
     /**
-     * Returns true if the container can return an entry for the given identifier.
+     * Returns true if the container can return an entry for the given identifier. An id on a cycle of bindings counts
+     * as known: get() throws a ContainerException for it, and PSR-11 allows that only when has() is true.
      */
     public function has(string $id): bool
     {
         $target = $this->target($id);
 
-        return $target !== null
-            && (isset($this->definitions[$target]) || (class_exists($target) && new ReflectionClass($target)->isInstantiable()));
+        return $target === null
+            || isset($this->definitions[$target])
+            || (class_exists($target) && new ReflectionClass($target)->isInstantiable());
     }
 
     /**

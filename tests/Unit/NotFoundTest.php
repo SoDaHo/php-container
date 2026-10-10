@@ -13,7 +13,6 @@ use Sodaho\Container\Exception\NotFoundException;
 
 /**
  * PSR-11: get() throws a NotFoundExceptionInterface for an id has() is false for, and says why.
- * (A cycle of bindings is the exception until 2.1: has() is false, get() throws a ContainerException.)
  */
 class NotFoundTest extends TestCase
 {

@@ -6,10 +6,11 @@ namespace Sodaho\Container\Tests\Unit;
 
 use PHPUnit\Framework\TestCase;
 use Sodaho\Container\Container;
+use Sodaho\Container\Exception\ContainerException;
 use Sodaho\Container\Exception\NotFoundException;
 
 /**
- * has(): true exactly for the ids get() can return, without creating anything.
+ * has(): true for the ids get() can return and for a cycle of bindings, without creating anything.
  */
 class HasTest extends TestCase
 {
@@ -104,14 +105,25 @@ class HasTest extends TestCase
         $this->assertInstanceOf(Fixtures\ConcreteService::class, $container->get(Fixtures\ServiceInterface::class));
     }
 
-    public function testHasReturnsFalseForAliasCycle(): void
+    public function testHasReturnsTrueForAnIdOnACycleOfBindings(): void
     {
+        // Known, but broken: get() throws a ContainerException, which PSR-11 allows only when has() is true
         $container = new Container();
-        $container->bind(Fixtures\ConcreteService::class, Fixtures\AlternativeService::class);
-        $container->bind(Fixtures\AlternativeService::class, Fixtures\ConcreteService::class);
+        // @phpstan-ignore argument.type (names that are no classes: what a cycle of bindings is made of)
+        $container->bind('Missing\First', 'Missing\Second');
+        // @phpstan-ignore argument.type (names that are no classes: what a cycle of bindings is made of)
+        $container->bind('Missing\Second', 'Missing\First');
 
-        $this->assertFalse($container->has(Fixtures\ConcreteService::class));
-        $this->assertFalse($container->has(Fixtures\AlternativeService::class));
+        $this->assertTrue($container->has('Missing\First'));
+        $this->assertTrue($container->has('Missing\Second'));
+
+        try {
+            $container->get('Missing\First');
+            $this->fail('Expected ContainerException');
+        } catch (ContainerException $e) {
+            $this->assertSame(ContainerException::class, $e::class);
+            $this->assertSame('Circular dependency detected: Missing\First -> Missing\Second -> Missing\First', $e->getMessage());
+        }
     }
 
     public function testHasReturnsTrueForInstanceBehindAlias(): void

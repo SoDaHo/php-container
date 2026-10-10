@@ -6,6 +6,7 @@
 
 - `set()` and `bind()` throw a `ContainerException` while `get()` runs, for any id: from a factory, a `resolve` or `error` hook, or a destructor that runs then. They used to throw only for the entries on the way; a factory could still bind a type an entry being created had already got the default for, and that entry kept the default without notice. The message is `Cannot define 'X' while get() is running: register definitions before it, not from a factory or a hook.`
 - The message for an entry that exists ends in `the entry has been created.` (was `... has been created or is being created.`).
+- `has()` is true for an id on a cycle of bindings; `get()` throws a `ContainerException` for it, as before. `has()` was false (so documented since 1.1.0), and PSR-11 allows an exception other than a `NotFoundExceptionInterface` only when `has()` is true. A cycle is a known entry that is broken, not a missing one.
 
 ### Fixed
 

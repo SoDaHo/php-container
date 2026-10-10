@@ -124,7 +124,7 @@ Once an entry has been created with the default, `set()` and `bind()` for that t
 
 ### Checking for an Entry
 
-`has($id)` is true when `get($id)` has something to return: a `set()` definition, a `bind()` chain that ends at one or at a class, or a class that can be instantiated. It follows bindings but creates nothing, so it does not check the constructor's parameters: `get()` can still fail with a `ContainerException`. When `has()` is false, `get()` throws a `NotFoundException` (a cycle of bindings is the exception, see Exceptions).
+`has($id)` is true when `get($id)` has something to return: a `set()` definition, a `bind()` chain that ends at one or at a class, or a class that can be instantiated. It follows bindings but creates nothing, so it does not check the constructor's parameters: `get()` can still fail with a `ContainerException`. When `has()` is false, `get()` throws a `NotFoundException`. An id on a cycle of bindings counts as known but broken: `has()` is true, and `get()` throws a `ContainerException`.
 
 ```php
 if ($container->has(CacheInterface::class)) {
@@ -210,7 +210,7 @@ try {
 
 | Exception | When |
 |-----------|------|
-| `NotFoundException` | `get()` for an id `has()` is false for: no such class or service, an interface without binding, a class that cannot be instantiated (abstract, an enum, constructor not public), also at the end of a binding. A cycle of bindings is the exception: `has()` is false, `get()` throws a `ContainerException`. |
+| `NotFoundException` | `get()` for an id `has()` is false for: no such class or service, an interface without binding, a class that cannot be instantiated (abstract, an enum, constructor not public), also at the end of a binding. |
 | `ContainerException` | `get()`: unresolvable parameter, a dependency the container cannot create (the `NotFoundException` is in `getPrevious()`), factory or constructor error, circular dependency (through constructors, bindings or factories). `set()` / `bind()`: called while `get()` runs, the entry has been created, or an entry was created with the default value for this type. `on()`: unknown event. Constructor and `create()`: a config array that is not empty. |
 
 `NotFoundException` extends `ContainerException`: catching `ContainerException` catches both.
