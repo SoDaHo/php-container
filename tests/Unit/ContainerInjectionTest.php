@@ -17,32 +17,64 @@ use Sodaho\Container\Exception\NotFoundException;
  */
 class ContainerInjectionTest extends TestCase
 {
-    private static function autowired(string $class): string
+    private static function autowired(string $class, string $registration): string
     {
-        return "Cannot autowire '$class': it is a container, and autowiring would create a new, empty one. "
-            . "Register the container for it: set(\\$class::class, fn (Container \$c) => \$c).";
+        return "Cannot autowire '$class': it is a container, and autowiring would create a new, empty one. $registration";
     }
 
     private static function notRegistered(string $class, string $parameter): string
     {
         return "Cannot resolve parameter '$parameter' in class '$class': '" . ContainerInterface::class
-            . "' is a container, which is not autowired. Register it: set(\\" . ContainerInterface::class . '::class, fn (Container $c) => $c).';
+            . "' is a container, which is not autowired. " . self::itself(ContainerInterface::class);
+    }
+
+    private static function itself(string $type): string
+    {
+        return "Register the container for it: set(\\$type::class, fn (Container \$c) => \$c).";
     }
 
     /**
-     * @return array<string, array{callable(Container): mixed, string, string}>
+     * @return array<string, array{callable(Container): mixed, string, string, string}>
      */
     public static function containersThatWouldBeAutowired(): array
     {
         $nothing = fn (Container $c) => null;
         $bound = fn (Container $c) => $c->bind(ContainerInterface::class, Container::class);
+        $foreign = Fixtures\ForeignContainer::class;
 
         return [
-            'get() of the class' => [$nothing, Container::class, self::autowired(Container::class)],
-            'parameter of the class' => [$nothing, Fixtures\ServiceNeedingContainer::class, self::autowired(Container::class)],
-            'parameter of the interface' => [$nothing, Fixtures\ServiceNeedingPsrContainer::class, self::notRegistered(Fixtures\ServiceNeedingPsrContainer::class, 'container')],
-            'optional parameter of the interface' => [$nothing, Fixtures\ServiceWithOptionalPsrContainer::class, self::notRegistered(Fixtures\ServiceWithOptionalPsrContainer::class, 'container')],
-            'interface bound to the class' => [$bound, Fixtures\ServiceNeedingPsrContainer::class, self::autowired(Container::class)],
+            'get() of the class' => [$nothing, Container::class, self::autowired(Container::class, self::itself(Container::class)), Container::class],
+            'parameter of the class' => [
+                $nothing,
+                Fixtures\ServiceNeedingContainer::class,
+                self::autowired(Container::class, self::itself(Container::class)),
+                Container::class,
+            ],
+            'parameter of the interface' => [
+                $nothing,
+                Fixtures\ServiceNeedingPsrContainer::class,
+                self::notRegistered(Fixtures\ServiceNeedingPsrContainer::class, 'container'),
+                ContainerInterface::class,
+            ],
+            'optional parameter of the interface' => [
+                $nothing,
+                Fixtures\ServiceWithOptionalPsrContainer::class,
+                self::notRegistered(Fixtures\ServiceWithOptionalPsrContainer::class, 'container'),
+                ContainerInterface::class,
+            ],
+            'interface bound to the class' => [
+                $bound,
+                Fixtures\ServiceNeedingPsrContainer::class,
+                self::autowired(Container::class, self::itself(Container::class)),
+                Container::class,
+            ],
+            // This container is no ForeignContainer: handing it over would fail, so the message asks for a factory
+            'container of another kind' => [
+                $nothing,
+                Fixtures\ServiceNeedingForeignContainer::class,
+                self::autowired($foreign, "Register a factory that creates it: set(\\$foreign::class, ...)."),
+                $foreign,
+            ],
         ];
     }
 
@@ -50,7 +82,7 @@ class ContainerInjectionTest extends TestCase
      * @param callable(Container): mixed $register
      */
     #[DataProvider('containersThatWouldBeAutowired')]
-    public function testContainerIsNotAutowired(callable $register, string $id, string $message): void
+    public function testContainerIsNotAutowired(callable $register, string $id, string $message, string $reportedId): void
     {
         $container = new Container();
         $register($container);
@@ -68,8 +100,27 @@ class ContainerInjectionTest extends TestCase
         }
 
         // Reported once, for the container that was asked for, not for the class that needs it
-        $this->assertCount(1, $reported);
-        $this->assertContains($reported[0], [Container::class, ContainerInterface::class]);
+        $this->assertSame([$reportedId], $reported);
+    }
+
+    public function testContainerParameterWithABrokenBindingNamesTheBinding(): void
+    {
+        // Something is registered: the failure is the binding's, not a missing registration
+        $container = new Container();
+        // @phpstan-ignore argument.type (a typo in the class name, the case the README describes)
+        $container->bind(ContainerInterface::class, 'Missing\Typo');
+
+        try {
+            $container->get(Fixtures\ServiceNeedingPsrContainer::class);
+            $this->fail('Expected ContainerException');
+        } catch (ContainerException $e) {
+            $this->assertSame(
+                "Cannot resolve dependency '" . ContainerInterface::class . "' for parameter 'container' in class '"
+                . Fixtures\ServiceNeedingPsrContainer::class . "'.",
+                $e->getMessage()
+            );
+            $this->assertSame("Class or service 'Missing\Typo' not found.", $e->getPrevious()?->getMessage());
+        }
     }
 
     public function testContainerRegisteredForItsInterfaceIsPassed(): void
@@ -87,5 +138,14 @@ class ContainerInjectionTest extends TestCase
         $container->set(Container::class, fn (Container $c) => $c);
 
         $this->assertSame($container, $container->get(Fixtures\ServiceNeedingContainer::class)->container);
+    }
+
+    public function testContainerOfAnotherKindWithAFactoryIsPassed(): void
+    {
+        $foreign = new Fixtures\ForeignContainer();
+        $container = new Container();
+        $container->set(Fixtures\ForeignContainer::class, fn () => $foreign);
+
+        $this->assertSame($foreign, $container->get(Fixtures\ServiceNeedingForeignContainer::class)->container);
     }
 }

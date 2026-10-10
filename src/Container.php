@@ -604,7 +604,7 @@ class Container implements ContainerInterface
         if ($reflector->implementsInterface(ContainerInterface::class)) {
             throw $this->fail($id, new ContainerException(
                 'Cannot autowire \'' . self::name($id) . "': it is a container, and autowiring would create a new, empty one. "
-                . 'Register the container for it: set(\\' . self::name($id) . '::class, fn (Container $c) => $c).'
+                . $this->registration($id)
             ));
         }
 
@@ -641,7 +641,8 @@ class Container implements ContainerInterface
             try {
                 $arguments[] = $this->get($depId);
             } catch (NotFoundException $e) {
-                if (is_a($depId, ContainerInterface::class, true)) {
+                // Only if nothing is registered for it: a binding that fails says so in the NotFoundException
+                if (is_a($depId, ContainerInterface::class, true) && !isset($this->aliases[$depId]) && !isset($this->definitions[$depId])) {
                     throw $this->containerNotRegistered($id, $param, $depId, $e);
                 }
 
@@ -668,10 +669,21 @@ class Container implements ContainerInterface
     {
         return new ContainerException(
             "Cannot resolve parameter '{$param->getName()}' in class '" . self::name($id) . "': '" . self::name($depId)
-            . "' is a container, which is not autowired. Register it: set(\\" . self::name($depId) . '::class, fn (Container $c) => $c).',
+            . "' is a container, which is not autowired. " . $this->registration($depId),
             0,
             $previous
         );
+    }
+
+    /**
+     * How to register a container type that is not autowired: this container itself, if it is one of that type;
+     * otherwise a factory that creates the container meant, since handing over this one would fail the type check.
+     */
+    private function registration(string $type): string
+    {
+        return $this instanceof $type
+            ? 'Register the container for it: set(\\' . self::name($type) . '::class, fn (Container $c) => $c).'
+            : 'Register a factory that creates it: set(\\' . self::name($type) . '::class, ...).';
     }
 
     /**

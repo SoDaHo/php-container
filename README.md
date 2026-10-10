@@ -134,6 +134,8 @@ The container autowires no container, itself included: autowiring would create a
 $container->set(ContainerInterface::class, fn (Container $c) => $c);
 ```
 
+This holds for every class that implements `ContainerInterface`, not only this container: a container of another kind needs a factory that creates it, and the message says which of the two to register.
+
 PSR-11 advises against handing the container to services; where you can, pass the services themselves.
 
 ### Checking for an Entry

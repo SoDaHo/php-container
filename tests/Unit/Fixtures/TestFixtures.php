@@ -575,3 +575,25 @@ class DestructorCallback
         }
     }
 }
+
+// A PSR-11 container of another kind, as a dependency
+class ForeignContainer implements \Psr\Container\ContainerInterface
+{
+    public function get(string $id): mixed
+    {
+        return null;
+    }
+
+    public function has(string $id): bool
+    {
+        return false;
+    }
+}
+
+// Asks for the container of another kind
+class ServiceNeedingForeignContainer
+{
+    public function __construct(public ForeignContainer $container)
+    {
+    }
+}
