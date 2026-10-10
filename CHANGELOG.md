@@ -20,6 +20,7 @@ Nothing to change for code that registers everything before the first `get()`, r
 | `has()` was false for an id on a cycle of bindings | It is true; `get()` still throws a `ContainerException` | Code that skipped a service when `has()` was false now sees the error |
 | `T\|false $x = false` got `false` with `T` bound; `T\|false $x` without default threw `it has a union type` | The binding is used (or the class autowired), and without a default the parameter is required like `T` | Nothing, unless the default was meant to win: then remove the binding or use another type |
 | A `resolve` hook that threw undid its entry only | It also undoes every entry created while it ran; their constructors run again on the next `get()` | Nothing |
+| A copy made with `clone` in a factory or a hook could register entries | It carries the lock of the running `get()`: `set()` and `bind()` on it throw | Make copies outside of `get()`; a copy made inside one is not supported |
 | Messages `Cannot redefine 'X': the entry has been created or is being created.` and `Interface 'X' not found: ...` for an interface bound to itself | `... the entry has been created.` and `Interface 'X' is bound to itself: ...` | Adjust code that compares messages |
 
 ### Security
@@ -43,7 +44,6 @@ The container no longer fails open in these cases (details below): a `Container`
 - A `resolve` hook that throws undoes its entry together with every entry created while it ran. Only the entry and the bindings to it went: a class the hook had created with the entry kept the instance that never passed the hook, and after the next `get()` the container held two instances of the entry. An entry the hook created for itself is undone as well; its constructor runs again on the next `get()`.
 - `bind()` stores the implementation under its declared name. An implementation written in another case became an entry of its own, a second instance beside the one `get()` of the class created.
 - A constructor parameter whose type writes a bound interface in another case gets the binding also when the interface was not loaded before: `bind()` loads it. With an autoloader that finds a class under its declared name only (PSR-4 on a case-sensitive file system), the type stayed as written and the parameter got its default.
-- A copy of the container made while `get()` runs (`clone $c` in a factory or hook) starts without the state of that `get()`. It took the entries in creation along, so `get()` of one of them failed in the copy as a circular dependency, and from inside an `error` hook it never reported a failure; it would also have kept `set()` and `bind()` locked for good.
 - `get()` of an interface bound to itself says so: `Interface 'X' is bound to itself: bind it to a class that implements it.` (was `... not found: no implementation is bound to it.`).
 
 ### Documentation

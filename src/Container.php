@@ -91,17 +91,6 @@ class Container implements ContainerInterface
     }
 
     /**
-     * A copy made while get() runs (from a factory or a hook) is not running that get(): it starts without the
-     * entries in creation, the count of running get() calls and the error hook guard of the original.
-     */
-    public function __clone(): void
-    {
-        $this->resolving = [];
-        $this->depth = 0;
-        $this->reportingError = false;
-    }
-
-    /**
      * Register a hook callback for an event.
      *
      * @param string $event 'resolve' or 'error'

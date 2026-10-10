@@ -75,6 +75,19 @@ class GetTest extends TestCase
         $this->assertNotSame($container->get(Fixtures\ConcreteService::class), $copy->get(Fixtures\ConcreteService::class));
     }
 
+    public function testCopyMadeOutsideOfGetRegistersOnItsOwn(): void
+    {
+        // A copy made between get() calls: what is registered in it stays out of the original
+        $container = new Container();
+        $container->get(Fixtures\TestService::class);
+        $copy = clone $container;
+
+        $copy->set('copy.only', fn () => 'value');
+
+        $this->assertSame('value', $copy->get('copy.only'));
+        $this->assertFalse($container->has('copy.only'));
+    }
+
     public function testFactoryReceivesContainer(): void
     {
         $container = new Container();
