@@ -38,15 +38,15 @@ class CircularDependencyTest extends TestCase
     public function testAliasCycleIsDetected(): void
     {
         $container = new Container();
-        $container->bind(Fixtures\FirstInterface::class, Fixtures\SecondInterface::class);
-        $container->bind(Fixtures\SecondInterface::class, Fixtures\FirstInterface::class);
+        // @phpstan-ignore argument.type (names that are no classes: what a cycle of bindings is made of)
+        $container->bind('Missing\First', 'Missing\Second');
+        // @phpstan-ignore argument.type (names that are no classes: what a cycle of bindings is made of)
+        $container->bind('Missing\Second', 'Missing\First');
 
         $this->expectException(ContainerException::class);
-        $this->expectExceptionMessage(
-            'Circular dependency detected: ' . Fixtures\FirstInterface::class . ' -> ' . Fixtures\SecondInterface::class . ' -> ' . Fixtures\FirstInterface::class
-        );
+        $this->expectExceptionMessage('Circular dependency detected: Missing\First -> Missing\Second -> Missing\First');
 
-        $container->get(Fixtures\FirstInterface::class);
+        $container->get('Missing\First');
     }
 
     public function testFactoryResolvingItsOwnIdIsDetected(): void

@@ -23,6 +23,7 @@ use Sodaho\Container\Traits\HasHooks;
  * - Nothing can be registered while get() runs; an entry that exists cannot be redefined, nor can a type an entry
  *   got a default for: set() and bind() throw instead of registering something that would never be used.
  * - Every id on a chain of bindings becomes an entry of its own when get() follows the chain.
+ * - What get() returns for the name of a class or interface is an instance of it; anything else throws.
  * - has() is true for the ids get() has something to create for, and for an id on a cycle of bindings (known, but
  *   broken: get() throws a ContainerException); when has() is false, get() throws a NotFoundException.
  *
@@ -127,20 +128,52 @@ class Container implements ContainerInterface
     /**
      * Bind an interface to a concrete implementation.
      *
-     * Uses a lightweight string mapping instead of closures for better memory efficiency.
+     * Uses a lightweight string mapping instead of closures for better memory efficiency. Where both classes exist,
+     * the implementation must implement or extend the interface, and the interface must be named as declared; the
+     * implementation is stored as declared. A name that does not exist is taken as written and fails at get().
      *
      * @param string $interface The interface or abstract class name
      * @param class-string $implementation The concrete class name
      *
-     * @throws ContainerException If get() is running, the entry has been created, or an entry got a default for this type
+     * @throws ContainerException If get() is running, the entry has been created, an entry got a default for this
+     *                            type, the interface is named otherwise than declared, or the implementation is no
+     *                            subtype of it
      */
     public function bind(string $interface, string $implementation): self
     {
         $this->assertNotCreated($interface);
-        $this->aliases[$interface] = $implementation;
+        $this->aliases[$interface] = self::implementation($interface, $implementation);
         // Released last: a factory object may have a destructor, which finds the binding in place
         unset($this->definitions[$interface]);
         return $this;
+    }
+
+    /**
+     * Check a binding as far as its classes exist, and return the implementation under its declared name. The
+     * interface is not renamed but must be written as declared: get() looks ids up as written, so a binding under
+     * another spelling would be found by autowiring, but not by get() with the same spelling. The implementation
+     * becomes an entry under its declared name, the one get() of that class creates, not a second one beside it.
+     */
+    private static function implementation(string $interface, string $implementation): string
+    {
+        $declared = class_exists($interface) || interface_exists($interface) ? new ReflectionClass($interface)->name : null;
+        if ($declared !== null && $declared !== $interface) {
+            throw new ContainerException('Cannot bind \'' . self::name($interface) . "': name it as declared, '" . self::name($declared) . "'.");
+        }
+
+        if (!class_exists($implementation) && !interface_exists($implementation)) {
+            return $implementation;
+        }
+        $implementation = new ReflectionClass($implementation)->name;
+
+        if ($declared !== null && !is_a($implementation, $declared, true)) {
+            throw new ContainerException(
+                'Cannot bind \'' . self::name($declared) . "' to '" . self::name($implementation) . "': it neither implements nor extends '"
+                . self::name($declared) . "'."
+            );
+        }
+
+        return $implementation;
     }
 
     /**
@@ -220,6 +253,18 @@ class Container implements ContainerInterface
             }
             $aliases[$target] = true;
             $target = $this->aliases[$target];
+        }
+
+        // What get() of a class returns is an instance of it. bind() checked what existed when it ran; an id
+        // without a class (a factory under a name) or a class loaded later is checked here.
+        foreach (array_keys($aliases) as $alias) {
+            $alias = (string) $alias;
+            if ((class_exists($alias) || interface_exists($alias)) && !$instance instanceof $alias) {
+                throw $this->fail($alias, new ContainerException(
+                    'Cannot resolve \'' . self::name($alias) . "': it is bound to '" . self::name($this->aliases[$alias])
+                    . "', whose entry is " . get_debug_type($instance) . ', not an instance of it.'
+                ));
+            }
         }
 
         // Every binding on the way is an entry from now on, so it can no longer be redefined either
@@ -422,12 +467,13 @@ class Container implements ContainerInterface
 
     /**
      * Run a set() factory. Whatever it throws is wrapped, so that get() throws a ContainerException as PSR-11
-     * asks; the message names the entry only, the text of the cause goes to the debug message.
+     * asks; the message names the entry only, the text of the cause goes to the debug message. A factory
+     * registered under a class name must return an instance of it: get() of a class promises one.
      */
     private function runFactory(string $id, callable $factory): mixed
     {
         try {
-            return $factory($this);
+            $instance = $factory($this);
         } catch (\Throwable $e) {
             throw $this->fail($id, new ContainerException(
                 'Error while creating service \'' . self::name($id) . "'.",
@@ -436,6 +482,15 @@ class Container implements ContainerInterface
                 self::describe($e)
             ), $e);
         }
+
+        if ((class_exists($id) || interface_exists($id)) && !$instance instanceof $id) {
+            throw $this->fail($id, new ContainerException(
+                'Error while creating service \'' . self::name($id) . "': the factory returned " . get_debug_type($instance)
+                . ', not an instance of it.'
+            ));
+        }
+
+        return $instance;
     }
 
     /**
@@ -448,10 +503,12 @@ class Container implements ContainerInterface
     private function autowire(string $id): object
     {
         if (!class_exists($id)) {
-            // An interface gets here when nothing is bound to it
-            $message = interface_exists($id)
-                ? 'Interface \'' . self::name($id) . "' not found: no implementation is bound to it."
-                : 'Class or service \'' . self::name($id) . "' not found.";
+            // An interface gets here when nothing is bound to it, or itself
+            $message = match (true) {
+                !interface_exists($id) => 'Class or service \'' . self::name($id) . "' not found.",
+                ($this->aliases[$id] ?? null) === $id => 'Interface \'' . self::name($id) . "' is bound to itself: bind it to a class that implements it.",
+                default => 'Interface \'' . self::name($id) . "' not found: no implementation is bound to it.",
+            };
             throw $this->fail($id, new NotFoundException($message));
         }
 

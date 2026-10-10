@@ -90,6 +90,8 @@ $service = $container->get(PaymentService::class);
 // PaymentService receives FileLogger for LoggerInterface parameter
 ```
 
+`bind()` checks the classes it is given, as far as they exist: the implementation must implement or extend the interface, and the interface must be written as declared (another case or a leading `\` throws, since `get()` with that spelling would not find the binding). The implementation is stored as declared, so it is the same entry `get()` of that class returns. A name that does not exist (a typo) is accepted and fails at `get()`, as does an interface bound to itself. A chain of bindings (`A` to `B`, `B` to `C`) has to go from interface to subtype at each step, so classes that exist cannot form a cycle.
+
 ### Singleton Behavior
 
 All resolved instances are cached (singleton pattern):
@@ -103,7 +105,7 @@ $logger2 = $container->get(Logger::class);
 $logger1 === $logger2; // true - same instance
 ```
 
-The id is used as given: `Logger::class`, `'\\' . Logger::class` and a differently cased spelling are three entries. Use `::class`. Constructor parameter types are different: a type written in another case than the class is declared still gets the entry, binding or factory of that class.
+The id is used as given: `Logger::class`, `'\\' . Logger::class` and a differently cased spelling are three entries. Use `::class`. Constructor parameter types are different: a type written in another case than the class is declared still gets the entry, binding or factory of that class, once PHP has the class loaded. `bind()` loads the classes it is given; a class that is not loaded yet is found by an autoloader only if it accepts that spelling (a PSR-4 autoloader on a case-sensitive file system does not), otherwise the type stays as written.
 
 ### Optional Dependencies
 
@@ -153,7 +155,7 @@ $logger = $container->get(Logger::class);   // Logger
 $name = $container->get('app.name');        // mixed
 ```
 
-This describes autowiring. A `set()` factory or `bind()` registered under a class name has to return an instance of that class; the container does not check it. PHPStan reports a type check on the result (`assert($logger instanceof Logger)`) as always true.
+This holds for every way an entry is made. A `set()` factory registered under a class or interface name has to return an instance of it, and so has the entry a binding ends at: `get()` throws a `ContainerException` otherwise (`null` included). PHPStan reports a type check on the result (`assert($logger instanceof Logger)`) as always true, and rightly so.
 
 ## Hooks
 
@@ -225,7 +227,7 @@ try {
 | Exception | When |
 |-----------|------|
 | `NotFoundException` | `get()` for an id `has()` is false for: no such class or service, an interface without binding, a class that cannot be instantiated (abstract, an enum, constructor not public), also at the end of a binding. |
-| `ContainerException` | `get()`: a container to autowire (see The Container Itself), unresolvable parameter, a dependency the container cannot create (the `NotFoundException` is in `getPrevious()`), factory or constructor error, circular dependency (through constructors, bindings or factories). `set()` / `bind()`: called while `get()` runs, the entry has been created, or an entry was created with the default value for this type. `on()`: unknown event. Constructor and `create()`: a config array that is not empty. |
+| `ContainerException` | `get()`: a container to autowire (see The Container Itself), unresolvable parameter, a dependency the container cannot create (the `NotFoundException` is in `getPrevious()`), factory or constructor error, circular dependency (through constructors, bindings or factories), a factory under a class name that returns something else, a binding that ends at an entry of another type. `set()` / `bind()`: called while `get()` runs, the entry has been created, or an entry was created with the default value for this type. `bind()`: the interface is written otherwise than declared, or the implementation neither implements nor extends it. `on()`: unknown event. Constructor and `create()`: a config array that is not empty. |
 
 `NotFoundException` extends `ContainerException`: catching `ContainerException` catches both.
 

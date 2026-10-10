@@ -106,19 +106,21 @@ class ErrorHookTest extends TestCase
     public function testErrorHookIsFiredForACycleOfBindings(): void
     {
         $container = new Container();
-        $container->bind(Fixtures\FirstInterface::class, Fixtures\SecondInterface::class);
-        $container->bind(Fixtures\SecondInterface::class, Fixtures\FirstInterface::class);
+        // @phpstan-ignore argument.type (names that are no classes: what a cycle of bindings is made of)
+        $container->bind('Missing\First', 'Missing\Second');
+        // @phpstan-ignore argument.type (names that are no classes: what a cycle of bindings is made of)
+        $container->bind('Missing\Second', 'Missing\First');
         $firedErrors = [];
         $container->on('error', function (array $data) use (&$firedErrors) {
             $firedErrors[] = $data;
         });
 
         try {
-            $container->get(Fixtures\FirstInterface::class);
+            $container->get('Missing\First');
             $this->fail('Expected ContainerException');
         } catch (ContainerException $e) {
             $this->assertCount(1, $firedErrors);
-            $this->assertSame(Fixtures\FirstInterface::class, $firedErrors[0]['id']);
+            $this->assertSame('Missing\First', $firedErrors[0]['id']);
             $this->assertSame($e, $firedErrors[0]['exception']);
         }
     }

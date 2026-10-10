@@ -72,8 +72,9 @@ class OptionalDependencyTest extends TestCase
                 [Fixtures\ServiceInterface::class => Fixtures\AbstractService::class],
                 "Cannot resolve dependency '" . Fixtures\ServiceInterface::class . "' for parameter 'service'",
             ],
+            // Through a name that is no class: classes that exist cannot form a cycle, each must extend the one before
             'cycle' => [
-                [Fixtures\ServiceInterface::class => Fixtures\FirstInterface::class, Fixtures\FirstInterface::class => Fixtures\ServiceInterface::class],
+                [Fixtures\ServiceInterface::class => 'Missing\Cycle', 'Missing\Cycle' => Fixtures\ServiceInterface::class],
                 'Circular dependency detected',
             ],
             'interface bound to itself' => [

@@ -114,7 +114,8 @@ class ServiceWithNoTypeNoDefault
 
 // ==================== Abstract/Interface ====================
 
-abstract class AbstractService
+// Implements the interface, so that it can be bound to it (and fail there: it is abstract)
+abstract class AbstractService implements ServiceInterface
 {
 }
 
@@ -122,7 +123,18 @@ interface ServiceInterface
 {
 }
 
-class ConcreteService implements ServiceInterface
+interface FirstInterface
+{
+}
+
+// A chain of bindings needs subtypes: FirstInterface -> SecondInterface -> ConcreteService. Declared before the
+// classes that implement it: a class can only be declared once what it implements is
+interface SecondInterface extends FirstInterface, ServiceInterface
+{
+}
+
+// Implements SecondInterface, which extends FirstInterface and ServiceInterface: it can end a chain of bindings
+class ConcreteService implements SecondInterface
 {
 }
 
@@ -243,15 +255,8 @@ class ServiceWithObjectDefault
 
 // ==================== Cycles Outside of Autowiring ====================
 
-interface FirstInterface
-{
-}
-
-interface SecondInterface
-{
-}
-
-class NeedsLogger
+// A logger itself, so that LoggerInterface can be bound to it (a cycle through a binding)
+class NeedsLogger implements FirstInterface, LoggerInterface
 {
     public function __construct(public LoggerInterface $logger)
     {

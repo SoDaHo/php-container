@@ -130,7 +130,7 @@ class HasTest extends TestCase
     {
         $container = new Container();
         $container->bind(Fixtures\FirstInterface::class, Fixtures\SecondInterface::class);
-        $container->set(Fixtures\SecondInterface::class, fn () => 'value');
+        $container->set(Fixtures\SecondInterface::class, fn () => new Fixtures\ConcreteService());
         $container->get(Fixtures\SecondInterface::class);
 
         $this->assertTrue($container->has(Fixtures\FirstInterface::class));
