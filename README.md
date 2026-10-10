@@ -259,7 +259,7 @@ A lazy object from a `set()` factory (`ReflectionClass::newLazyProxy()`) is crea
 
 A container is meant for one request at a time. Fibers or coroutines that share one see each other's entries in creation: a second `get()` of an entry the first has not finished yet fails as a circular dependency (once the entry exists and only its `resolve` hook runs, it returns the entry), and `set()` or `bind()` throws while another one is inside `get()`. Use one container per request or coroutine, or create the shared entries before they start.
 
-`clone $container` copies the registrations and shares the entries created so far; entries created afterwards exist once in each copy. Hooks that captured the original container (`use ($container)`) keep using the original; factories get the container that runs them.
+`clone $container` copies the registrations and shares the entries created so far; entries created afterwards exist once in each copy. A copy made while `get()` runs (in a factory or a hook) does not take part in that `get()`: it can register, and creates the entry the original is still creating on its own. Hooks that captured the original container (`use ($container)`) keep using the original; factories get the container that runs them.
 
 ## Requirements
 
