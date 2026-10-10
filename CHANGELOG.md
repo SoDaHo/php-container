@@ -6,8 +6,9 @@
 - `set()` and `bind()` throw while any `get()` runs, for any id; before, only for the ids on the way.
 - `get()` throws when a factory or binding under a class or interface name yields no instance of it (`null` too).
 - `bind()` loads both classes and throws for an implementation that is no subtype or a name not written as declared.
+- The first `get()` of a factory's id runs the autoloader for that name (type check); its exceptions pass unchanged.
 - No container is autowired: a `ContainerInterface` class or parameter without registration throws, optional or not.
-- `T|false` and `T|false|null` parameters are resolved like `?T`; they always got their default.
+- `T|false` and `T|false|null` parameters are resolved like `?T`; they got their default, or threw without one.
 - `has()` is true for an id on a cycle of bindings; `get()` throws a `ContainerException` for it, as before.
 - A throwing `resolve` hook makes `get()` throw `Resolve hook failed for 'X'.`; its exception passed unchanged.
 - A throwing `error` hook keeps the failure: same class and message, the failure in `getPrevious()`.
@@ -15,8 +16,7 @@
 ### Fixed
 - A throwing `resolve` hook undoes every entry created while it ran; entries holding its instance stayed.
 - What a destructor throws while the container discards a value goes to `getDebugMessage()`; it replaced the failure.
-- `get()` checks an existing entry against its class once the class is loaded.
-- A parameter that writes a bound interface in another case gets the binding also when the interface was not loaded.
+- `get()` checks an existing entry once its class is loaded; a type in another case finds a bound, unloaded interface.
 
 ## [2.0.1] - 2026-10-09
 
