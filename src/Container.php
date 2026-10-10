@@ -230,7 +230,7 @@ class Container implements ContainerInterface
         try {
             $instance = isset($this->definitions[$id])
                 ? $this->runFactory($id, $this->definitions[$id])
-                : $this->resolve($id, $defaulted);
+                : $this->autowire($id, $defaulted);
         } finally {
             unset($this->resolving[$id]);
         }
@@ -408,7 +408,7 @@ class Container implements ContainerInterface
      *
      * @param-out list<string> $defaulted
      */
-    private function resolve(string $id, array &$defaulted): object
+    private function autowire(string $id, array &$defaulted): object
     {
         if (!class_exists($id)) {
             // An interface gets here when nothing is bound to it
