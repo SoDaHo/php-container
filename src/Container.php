@@ -476,7 +476,10 @@ class Container implements ContainerInterface
             return $exception;
         }
 
-        $debug = 'The error hook threw ' . self::describe($thrown);
+        // The details of the failure come first: a caller that logs the debug message keeps them although the hook
+        // (often the log sink itself) failed
+        $failure = $exception->getDebugMessage();
+        $debug = ($failure === null ? 'The' : $failure . '; the') . ' error hook threw ' . self::describe($thrown);
 
         return $exception instanceof NotFoundException
             ? new NotFoundException($exception->getMessage(), 0, $exception, $debug)

@@ -107,7 +107,11 @@ class ErrorHookFailureTest extends TestCase
         $container = new Container();
         $register($container);
         $thrown = new \RuntimeException('log sink unavailable');
-        $container->on('error', fn () => throw $thrown);
+        $causes = [];
+        $container->on('error', function (array $data) use ($thrown, &$causes) {
+            $causes[] = $data['exception'];
+            throw $thrown;
+        });
 
         try {
             $container->get($id);
@@ -115,13 +119,19 @@ class ErrorHookFailureTest extends TestCase
         } catch (ContainerException $e) {
             $this->assertSame(ContainerException::class, $e::class);
             $this->assertSame($message, $e->getMessage());
-            $this->assertHookIsInTheDebugMessage($e, $thrown);
-            // The exception get() would have thrown without the hook, with the cause behind it
+            // The exception get() would have thrown without the hook, with the cause the hook was given behind it
             $failure = $e->getPrevious();
             $this->assertInstanceOf(ContainerException::class, $failure);
             $this->assertSame($message, $failure->getMessage());
-            $this->assertInstanceOf(\Throwable::class, $failure->getPrevious());
-            $this->assertNotSame($thrown, $failure->getPrevious());
+            $this->assertCount(1, $causes);
+            $this->assertSame($causes[0], $failure->getPrevious());
+            // The debug message carries the cause first, then what the hook threw
+            $this->assertSame(
+                $failure->getDebugMessage() . '; the error hook threw ' . $thrown::class . ' in ' . $thrown->getFile() . ':'
+                . $thrown->getLine() . ': ' . $thrown->getMessage(),
+                $e->getDebugMessage()
+            );
+            $this->assertNotNull($failure->getDebugMessage());
         }
     }
 
