@@ -57,6 +57,7 @@ The container no longer fails open in these cases (details below): a `Container`
 - PHPUnit 11 and 12 start at 11.5.50 and 12.5.8. The suite was run on both and on 13.4.1, the version in the lock.
 - The private method that autowires a class is called `autowire()`, apart from the `resolve` hook. `following` is replaced by a counter of running `get()` calls; the defaults an entry gets are marked at once and dropped with the entry; undoing a failed hook cuts the entries back to a mark.
 - New test files by topic: registration during `get()`, the hook rollback, error hooks that throw, container injection, union types, binding checks, destructors of discarded values.
+- CI pins its actions to commit SHAs (checkout v6.1.0, setup-php 2.40.0, cache v5.1.0) and its container image to a digest.
 
 ## [2.0.1] - 2026-10-09
 
