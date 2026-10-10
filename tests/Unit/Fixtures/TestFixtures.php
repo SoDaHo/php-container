@@ -543,3 +543,35 @@ class ServiceWithClassOrStringUnion
     {
     }
 }
+
+// ==================== Destructors That Fail or Use the Container ====================
+
+// Its destructor throws while armed; a test arms it only around the get() it watches
+class ThrowingDestructor
+{
+    public static bool $armed = false;
+
+    public function __destruct()
+    {
+        if (self::$armed) {
+            self::$armed = false;
+            throw new \LogicException('Destructor failed');
+        }
+    }
+}
+
+// Its destructor runs what a test put in $run, once
+class DestructorCallback
+{
+    /** @var (\Closure(): mixed)|null */
+    public static ?\Closure $run = null;
+
+    public function __destruct()
+    {
+        $run = self::$run;
+        self::$run = null;
+        if ($run !== null) {
+            $run();
+        }
+    }
+}

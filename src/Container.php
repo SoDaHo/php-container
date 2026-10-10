@@ -306,11 +306,19 @@ class Container implements ContainerInterface
         try {
             $this->trigger('resolve', ['id' => $id, 'instance' => $instance]);
         } catch (\Throwable $e) {
-            $this->rollback($mark);
+            // The local reference goes first, so that the rollback can release the entry (unless the hook's
+            // exception still holds it in the arguments of its trace)
+            unset($instance);
+            $released = $this->rollback($mark);
             // What a hook throws leaves get() as a ContainerException, as PSR-11 asks: the message names the entry
             // only (the hook's text may carry values), the hook's exception is in getPrevious() and the debug message.
             // A NotFoundExceptionInterface would also tell the caller that an entry has() is true for does not exist.
-            throw new ContainerException('Resolve hook failed for \'' . self::name($id) . "'.", 0, $e, self::describe($e));
+            throw new ContainerException(
+                'Resolve hook failed for \'' . self::name($id) . "'.",
+                0,
+                $e,
+                self::describe($e) . ($released === null ? '' : '; ' . $released)
+            );
         }
 
         return $instance;
@@ -320,13 +328,49 @@ class Container implements ContainerInterface
      * Undo an entry whose resolve hook threw, with every entry created after it while the hook ran: the entry never
      * passed the hook, and an entry the hook created may hold it (a class that needs it, a binding to it, a factory
      * that asked for it). Keeping those would leave two instances once the next get() creates the entry anew. Entries
-     * created before it, its dependencies among them, passed their own hooks and stay.
+     * created before it, its dependencies among them, passed their own hooks and stay. Returns what destructors threw.
      */
-    private function rollback(int $mark): void
+    private function rollback(int $mark): ?string
     {
         $undone = array_slice($this->instances, $mark, null, true);
         $this->instances = array_slice($this->instances, 0, $mark, true);
         $this->forget(array_keys($undone));
+
+        return self::release($undone);
+    }
+
+    /**
+     * Drop values the container gives up on (entries a failed hook undid, a factory result of the wrong type) and run
+     * the destructors of those nothing else holds here, where what they throw is caught: it must not replace the
+     * exception get() throws for the failure. Returns a description of it for that exception's debug message.
+     *
+     * @param array<mixed> $values Held by the caller nowhere else, so that unsetting an element can destroy it
+     */
+    private static function release(array &$values): ?string
+    {
+        $thrown = [];
+        foreach (array_keys($values) as $key) {
+            try {
+                self::destroy($values, $key);
+            } catch (\Throwable $e) {
+                $thrown[] = self::describe($e);
+            }
+        }
+
+        return $thrown === [] ? null : 'A destructor threw while the container discarded it: ' . implode('; ', $thrown);
+    }
+
+    /**
+     * Unset one value. If nothing else holds it, its destructor runs now, and what it throws comes out of here.
+     *
+     * @param array<mixed> $values
+     *
+     * @throws \Throwable What the destructor throws
+     */
+    // @phpstan-ignore throws.unusedType (unset() runs the destructor, whose exception PHPStan does not follow)
+    private static function destroy(array &$values, int|string $key): void
+    {
+        unset($values[$key]);
     }
 
     /**
@@ -482,9 +526,15 @@ class Container implements ContainerInterface
         }
 
         if ((class_exists($id) || interface_exists($id)) && !$instance instanceof $id) {
+            $type = get_debug_type($instance);
+            $discarded = [$instance];
+            unset($instance);
+            $released = self::release($discarded);
             throw $this->fail($id, new ContainerException(
-                'Error while creating service \'' . self::name($id) . "': the factory returned " . get_debug_type($instance)
-                . ', not an instance of it.'
+                'Error while creating service \'' . self::name($id) . "': the factory returned $type, not an instance of it.",
+                0,
+                null,
+                $released
             ));
         }
 
