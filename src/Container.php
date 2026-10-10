@@ -14,7 +14,7 @@ use Sodaho\Container\Exception\NotFoundException;
 use Sodaho\Container\Traits\HasHooks;
 
 /**
- * Lightweight PSR-11 container with autowiring.
+ * PSR-11 container with constructor autowiring.
  *
  * Invariants:
  * - An entry is kept once it is created (a singleton). Only an entry whose resolve hook throws is undone, with every
@@ -64,7 +64,7 @@ class Container implements ContainerInterface
     /**
      * Create a new Container instance. The environment is not read.
      *
-     * @param array{} $config There are no options; the parameter only rejects the config array 1.x took
+     * @param array{} $config There are no options; the parameter only rejects a config array that is not empty
      *
      * @throws ContainerException If an option is passed: it would have no effect
      */
@@ -129,7 +129,7 @@ class Container implements ContainerInterface
     /**
      * Bind an interface to a concrete implementation.
      *
-     * Uses a lightweight string mapping instead of closures for better memory efficiency. Both names are loaded (the
+     * Stored as a name-to-name mapping that get() follows, not as a factory. Both names are loaded (the
      * autoloader runs here). Where a class exists, it must be named as declared, and where both exist, the
      * implementation must implement or extend the interface. A name that does not exist is taken as written and
      * fails at get().
