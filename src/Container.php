@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Sodaho\Container;
 
 use Psr\Container\ContainerInterface;
+use Psr\Container\NotFoundExceptionInterface;
 use ReflectionClass;
 use ReflectionNamedType;
 use ReflectionParameter;
@@ -262,6 +263,10 @@ class Container implements ContainerInterface
             $this->trigger('resolve', ['id' => $id, 'instance' => $instance]);
         } catch (\Throwable $e) {
             $this->rollback($mark);
+            // has() is true for the entry: a NotFoundExceptionInterface would tell the caller it does not exist
+            if ($e instanceof NotFoundExceptionInterface) {
+                throw new ContainerException('Resolve hook failed for \'' . self::name($id) . "'.", 0, $e, self::describe($e));
+            }
             throw $e;
         }
 
@@ -345,33 +350,44 @@ class Container implements ContainerInterface
     }
 
     /**
-     * Report a failure to the 'error' hook; returns the exception for the caller to throw.
+     * Report a failure to the 'error' hook and return the exception for the caller to throw: $exception, or, if the
+     * hook threw, one of the same class and message with $exception as previous and what the hook threw in the debug
+     * message. A failing hook (a log sink that is down) must not hide the failure, nor turn a NotFoundException into
+     * something else or the other way round.
      *
-     * @template E of ContainerException
-     *
-     * @param E $exception
-     *
-     * @return E
+     * @param \Throwable|null $cause What the hook receives, if not $exception: what a factory or constructor threw
      */
-    private function fail(string $id, ContainerException $exception): ContainerException
+    private function fail(string $id, ContainerException $exception, ?\Throwable $cause = null): ContainerException
     {
-        $this->report($id, $exception);
-        return $exception;
+        $thrown = $this->report($id, $cause ?? $exception);
+        if ($thrown === null) {
+            return $exception;
+        }
+
+        $debug = 'The error hook threw ' . self::describe($thrown);
+
+        return $exception instanceof NotFoundException
+            ? new NotFoundException($exception->getMessage(), 0, $exception, $debug)
+            : new ContainerException($exception->getMessage(), 0, $exception, $debug);
     }
 
     /**
-     * Fire the 'error' hook. A hook that uses the container and fails there is not called
-     * again for that failure: it would call itself until the stack is exhausted.
+     * Fire the 'error' hook and return what it threw, if it did. A hook that uses the container and fails there is
+     * not called again for that failure: it would call itself until the stack is exhausted.
      */
-    private function report(string $id, \Throwable $exception): void
+    private function report(string $id, \Throwable $exception): ?\Throwable
     {
         if ($this->reportingError) {
-            return;
+            return null;
         }
 
         $this->reportingError = true;
         try {
             $this->trigger('error', ['id' => $id, 'exception' => $exception]);
+
+            return null;
+        } catch (\Throwable $thrown) {
+            return $thrown;
         } finally {
             $this->reportingError = false;
         }
@@ -413,13 +429,12 @@ class Container implements ContainerInterface
         try {
             return $factory($this);
         } catch (\Throwable $e) {
-            $this->report($id, $e);
-            throw new ContainerException(
+            throw $this->fail($id, new ContainerException(
                 'Error while creating service \'' . self::name($id) . "'.",
                 0,
                 $e,
                 self::describe($e)
-            );
+            ), $e);
         }
     }
 
@@ -476,17 +491,11 @@ class Container implements ContainerInterface
             }
 
             // A dependency has() is false for is "not found" for whoever asks for it, but an error of the class
-            // that needs it: has() is true for that class, so its get() must not throw a NotFoundException.
-            // Judged before get() runs: if has() is true for the dependency, a NotFoundException is a hook's.
-            $missing = !$this->has($depId);
-
+            // that needs it: has() is true for that class, so its get() must not throw a NotFoundException. Only
+            // such a dependency makes get() throw one; what hooks throw is wrapped where they run.
             try {
                 $arguments[] = $this->get($depId);
             } catch (NotFoundException $e) {
-                if (!$missing) {
-                    throw $e;
-                }
-
                 throw new ContainerException(
                     'Cannot resolve dependency \'' . self::name($depId) . "' for parameter '{$param->getName()}' in class '" . self::name($id) . "'.",
                     0,
@@ -570,13 +579,11 @@ class Container implements ContainerInterface
      */
     private function instantiationFailed(string $id, \Throwable $e): ContainerException
     {
-        $this->report($id, $e);
-
-        return new ContainerException(
+        return $this->fail($id, new ContainerException(
             'Failed to instantiate \'' . self::name($id) . "'.",
             0,
             $e,
             self::describe($e)
-        );
+        ), $e);
     }
 }

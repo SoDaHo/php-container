@@ -8,6 +8,7 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Sodaho\Container\Container;
 use Sodaho\Container\Exception\ContainerException;
+use Sodaho\Container\Exception\NotFoundException;
 
 /**
  * Nothing can be registered while get() runs: a factory or hook that registers would change what some of the
@@ -127,9 +128,11 @@ class RegistrationDuringGetTest extends TestCase
 
         try {
             $container->get('Missing\Service');
-            $this->fail('Expected ContainerException');
-        } catch (ContainerException $e) {
-            $this->assertSame(self::message('Missing\Service'), $e->getMessage());
+            $this->fail('Expected NotFoundException');
+        } catch (NotFoundException $e) {
+            // The hook's exception does not replace the failure: it is in the debug message
+            $this->assertSame("Class or service 'Missing\Service' not found.", $e->getMessage());
+            $this->assertStringEndsWith(': ' . self::message('Missing\Service'), (string) $e->getDebugMessage());
         }
 
         // Once get() has failed, the replacement is accepted

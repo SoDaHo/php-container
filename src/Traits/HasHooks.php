@@ -8,7 +8,8 @@ namespace Sodaho\Container\Traits;
  * Trait for event hooks.
  *
  * Provides on() for registering and trigger() for firing events.
- * "Fail Hard" implementation: Exceptions in hooks bubble up to the application.
+ * "Fail Hard" implementation: exceptions in hooks bubble up to the caller of trigger(), which decides what to do with
+ * them (the container keeps a failing error hook from hiding the failure it reports).
  */
 trait HasHooks
 {

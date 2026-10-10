@@ -191,8 +191,9 @@ class ResolveHookTest extends TestCase
      * @param class-string $id
      */
     #[DataProvider('dependenciesWithAFailingResolveHook')]
-    public function testNotFoundExceptionOfAResolveHookIsNotMistakenForAMissingDependency(callable $register, string $id, string $announced): void
+    public function testNotFoundExceptionOfAResolveHookIsWrapped(callable $register, string $id, string $announced): void
     {
+        // has() is true for the entry, so get() must not throw a NotFoundException for it, nor for what needs it
         $container = new Container();
         $register($container);
         $container->on('resolve', function (array $data) use ($container, $announced) {
@@ -201,13 +202,19 @@ class ResolveHookTest extends TestCase
             }
         });
 
-        try {
-            // The dependency is created before its hook fails
-            $container->get($id);
-            $this->fail('Expected NotFoundException');
-        } catch (ContainerException $e) {
-            $this->assertSame(NotFoundException::class, $e::class);
-            $this->assertSame("Class or service 'Missing\Thing' not found.", $e->getMessage());
+        foreach ([$announced, $id] as $asked) {
+            $this->assertTrue($container->has($asked));
+            try {
+                $container->get($asked);
+                $this->fail('Expected ContainerException');
+            } catch (ContainerException $e) {
+                $this->assertSame(ContainerException::class, $e::class);
+                $this->assertSame("Resolve hook failed for '$announced'.", $e->getMessage());
+                $previous = $e->getPrevious();
+                $this->assertInstanceOf(NotFoundException::class, $previous);
+                $this->assertSame("Class or service 'Missing\Thing' not found.", $previous->getMessage());
+                $this->assertStringEndsWith(": Class or service 'Missing\Thing' not found.", (string) $e->getDebugMessage());
+            }
         }
     }
 }
