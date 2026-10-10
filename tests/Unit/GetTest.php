@@ -75,6 +75,12 @@ class GetTest extends TestCase
         $this->assertNotSame($container->get(Fixtures\ConcreteService::class), $copy->get(Fixtures\ConcreteService::class));
     }
 
+    public function testContainerDeclaresNoCloneMethod(): void
+    {
+        // A __clone() of its own would break subclasses that declare one with another signature or visibility
+        $this->assertFalse(method_exists(Container::class, '__clone'));
+    }
+
     public function testCopyMadeOutsideOfGetRegistersOnItsOwn(): void
     {
         // A copy made between get() calls: what is registered in it stays out of the original
