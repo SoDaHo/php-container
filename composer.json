@@ -1,6 +1,6 @@
 {
     "name": "sodaho/container",
-    "description": "Lightweight PSR-11 dependency injection container with autowiring.",
+    "description": "PSR-11 dependency injection container with constructor autowiring.",
     "type": "library",
     "license": "MIT",
     "keywords": ["container", "dependency-injection", "di", "psr-11", "autowiring", "php"],

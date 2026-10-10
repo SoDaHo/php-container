@@ -1,22 +1,11 @@
-# php-container
+# sodaho/container
 
-Lightweight PSR-11 dependency injection container for PHP. Autowiring, zero bloat.
+PSR-11 dependency injection container with constructor autowiring.
 
-## Why This Library?
+## Requirements
 
-**What it does:**
-- PSR-11 container with constructor autowiring
-- Nothing to configure: no options, no environment variables, no files
-- Zero dependencies beyond `psr/container`
-
-**What it deliberately does not:**
-- Attribute-based configuration
-- Caching of Reflection results (measured: it costs more than it saves)
-- Lazy objects (PHP 8.4 has them built in: return `ReflectionClass::newLazyProxy()` from a `set()` factory)
-- Compiler passes
-- Tagged services
-
-If you need those, use Symfony DI or PHP-DI.
+- PHP ^8.5
+- psr/container ^2.0; the package provides `psr/container-implementation` 2.0
 
 ## Installation
 
@@ -24,254 +13,138 @@ If you need those, use Symfony DI or PHP-DI.
 composer require sodaho/container
 ```
 
-Coming from 1.x? The CHANGELOG lists every line to change under "Upgrading from 1.x".
-
-## Usage
-
-### Basic Autowiring
+## Quick start
 
 ```php
 use Sodaho\Container\Container;
 
-$container = new Container();
-
-// Automatically resolves dependencies via Reflection
-$controller = $container->get(UserController::class);
+$container = Container::create()->bind(LoggerInterface::class, FileLogger::class);
+$container->set(Database::class, fn (Container $c) => new Database($dsn, $c->get(LoggerInterface::class)));
+$controller = $container->get(UserController::class); // its constructor dependencies are created and passed
 ```
 
-The container analyzes constructor parameters and recursively resolves all dependencies:
+## Reference
+
+### Container (`Sodaho\Container\Container`, implements PSR-11 `ContainerInterface`)
+
+| Signature | Description |
+|---|---|
+| `__construct(array $config = [])` | Creates an empty container; reads no environment variables and no files. |
+| `static create(array $config = []): static` | `new static($config)`, for chaining. |
+| `set(string $id, callable $factory): void` | Registers a factory; the first `get($id)` calls `$factory($container)`. |
+| `bind(string $interface, string $implementation): self` | Maps an id to another id; `get()` follows the chain. |
+| `get(string $id): mixed` | Returns the entry for the id, created on first use and kept (singleton). |
+| `has(string $id): bool` | True when `get($id)` has an entry to return or create; creates nothing. |
+| `on(string $event, callable $callback): static` | Registers a callback for the `resolve` or `error` hook. |
+
+Registration:
+- The last `set()` or `bind()` for an id wins. Ids are used as given: `Logger::class`, `'\\' . Logger::class` and
+  another case are three ids. Use `::class`.
+- `set()` and `bind()` throw while any `get()` runs (from a factory, a hook, a destructor), for an id whose entry
+  exists, and for a type an entry got its default value for. Register before the first `get()`.
+- `bind()` loads the implementation, then the interface. A name that exists must be written as declared (another
+  case, a leading `\` or a `class_alias()` name throws); where both exist, the implementation must implement or
+  extend the interface. A name no class has is taken as written: a typo in the implementation makes `get()` throw a
+  `NotFoundException`, a typo in the interface leaves a binding that only that spelling finds.
+
+Autowiring, per constructor parameter:
+
+| Parameter type | Gets |
+|---|---|
+| Class or interface with a factory, binding or entry | That entry; a binding that fails throws, default or not |
+| Concrete instantiable class | The class, autowired; if it cannot be built, `get()` throws, default or not |
+| Interface, abstract class or enum the container cannot provide | Its default; without one a `ContainerException` |
+| `?T`, `T\|false`, `T\|false\|null` | Like `T` |
+| Builtin type, other union, intersection type, no type | Its default; without one a `ContainerException` |
+| Variadic | A `ContainerException` |
+| A type that implements `ContainerInterface`, nothing registered | A `ContainerException`, optional or not |
+
+- All parameters are checked before the first dependency is created; dependencies are created in parameter order.
+  A default is evaluated only when it is used.
+- A type written in another case than declared gets the class's entry once PHP has the class loaded.
+- To pass the container itself: `$container->set(ContainerInterface::class, fn (Container $c) => $c);`
+
+Results:
+- `get()` of a class or interface name returns an instance of it or throws (a factory or binding that yields another
+  type, `null` included). PHPStan types `get(Foo::class)` as `Foo`, any other id as `mixed`.
+- `has()` is true for an id with a factory, an instantiable class, a binding chain that ends at one of them, and an
+  id on a cycle of bindings (`get()` then throws). It runs the autoloader and checks no constructor parameters.
+- One container serves one request at a time: fibers sharing one make each other's `set()` and `bind()` throw, and a
+  second `get()` of an entry still in creation fails as a circular dependency.
+- `clone` copies registrations, shares entries created so far; a copy made in `get()` keeps its `set()`/`bind()` lock.
+
+### ContainerException, NotFoundException
 
 ```php
-class UserController {
-    public function __construct(
-        private UserService $userService,  // Auto-resolved
-        private Logger $logger             // Auto-resolved
-    ) {}
-}
+public function __construct(string $message = 'Container error', int $code = 0, ?\Throwable $previous = null,
+    protected ?string $debugMessage = null)
+public function getDebugMessage(): ?string
 ```
 
-### Manual Definitions
+`getDebugMessage()` returns what `getMessage()` keeps out, or `null`: for a wrapped exception
+`Class in file:line: message` of it and each exception behind it, joined by ` <- `.
 
-For services that need configuration or primitives:
+### HasHooks (trait)
 
-```php
-$container = new Container();
+`on(string $event, callable $callback): static` appends a callback; the protected `trigger()` runs the callbacks
+of an event in order and lets their exceptions pass.
 
-// Factory receives the container for nested resolution
-$container->set(Database::class, fn(Container $c) => new Database(
-    host: $_ENV['DB_HOST'],
-    logger: $c->get(Logger::class)
-));
+## Configuration
 
-// Simple values
-$container->set('app.name', fn() => 'My Application');
-```
-
-The last `set()` or `bind()` for an id wins. Register definitions and bindings before the first `get()`. While `get()` runs, `set()` and `bind()` throw a `ContainerException`, for any id: a factory, a hook or a destructor that registers something then would change what some entries get and not others. Entries are singletons: a `set()` or `bind()` for an entry that has been created throws as well, and so does one for a type an entry was created with the default value for (see Optional Dependencies).
-
-### Interface Binding
-
-Bind interfaces to concrete implementations:
-
-```php
-$container = new Container();
-
-// Short syntax
-$container->bind(LoggerInterface::class, FileLogger::class);
-$container->bind(CacheInterface::class, RedisCache::class);
-
-// Fluent chaining
-$container = Container::create()
-    ->bind(LoggerInterface::class, FileLogger::class)
-    ->bind(CacheInterface::class, RedisCache::class);
-
-// Now autowiring resolves interfaces automatically
-$service = $container->get(PaymentService::class);
-// PaymentService receives FileLogger for LoggerInterface parameter
-```
-
-`bind()` loads both classes it is given (the autoloader runs then, and what it throws leaves `bind()`) and checks them as far as they exist: the implementation must implement or extend the interface, and both must be written as declared. Another case, a leading `\` or the name of a `class_alias()` throws: `get()` looks ids up as written and would not find the binding under that spelling, and a factory registered under the name would be passed over. The implementation is loaded first, so an interface it implements is found in any spelling. A name that no class or interface has, even then, is accepted as written. A typo in the implementation makes `get()` fail (a `NotFoundException` at the end of the binding), as does an interface bound to itself. A typo in the interface leaves a binding under that name only (`get()` with that spelling returns the implementation), which autowiring never asks for: a parameter of the real interface does not see it, and an optional one gets its default. Write both names with `::class`. A chain of bindings (`A` to `B`, `B` to `C`) goes from interface to subtype at each step where the classes exist, so classes that exist cannot form a cycle.
-
-### Singleton Behavior
-
-All resolved instances are cached (singleton pattern):
-
-```php
-$container = new Container();
-
-$logger1 = $container->get(Logger::class);
-$logger2 = $container->get(Logger::class);
-
-$logger1 === $logger2; // true - same instance
-```
-
-The id is used as given: `Logger::class`, `'\\' . Logger::class` and a differently cased spelling are three entries. Use `::class`. Constructor parameter types are different: a type written in another case than the class is declared still gets the entry, binding or factory of that class, once PHP has the class loaded. `bind()` loads the classes it is given; a class that is not loaded yet is found by an autoloader only if it accepts that spelling (a PSR-4 autoloader on a case-sensitive file system does not), otherwise the type stays as written. A `set()` under the name of a `class_alias()` or with a leading `\` is an id of its own as well: autowiring asks for the declared class and passes over that factory.
-
-### Optional Dependencies
-
-A constructor parameter with a default value gets that default when the container cannot provide the type: an interface or abstract class without binding, or an enum. If something is bound, the binding is used and the default (which may be `new Foo()`) is not evaluated; a binding that cannot be resolved (a typo in the class name) throws.
-
-```php
-class Mailer {
-    public function __construct(
-        private ?LoggerInterface $logger = null,   // null unless LoggerInterface is bound
-        private Priority $priority = Priority::Normal,
-    ) {}
-}
-```
-
-A concrete class that exists but cannot be built (for example because it needs a string) is a wiring error and throws, default or not.
-
-A union of one class with `null` or `false` (`LoggerInterface|false $logger = false`) counts as that class, like `?LoggerInterface`; without a default it is required like `LoggerInterface`. Any other union type gets its default, and throws without one.
-
-Once an entry has been created with the default, `set()` and `bind()` for that type throw a `ContainerException`: the entry would keep its default and never see the definition. Register them before the first `get()`.
-
-### The Container Itself
-
-The container autowires no container, itself included: autowiring would create a new, empty one, without the factories, bindings and hooks of the container that was asked. `get()` throws a `ContainerException` for a class that implements `ContainerInterface` and has no factory, and for a constructor parameter that asks for a container nothing is registered for, optional or not. Register the container under the type the parameter names:
-
-```php
-$container->set(ContainerInterface::class, fn (Container $c) => $c);
-```
-
-This holds for every class that implements `ContainerInterface`, not only this container: a container of another kind needs a factory that creates it, and the message says which of the two to register.
-
-PSR-11 advises against handing the container to services; where you can, pass the services themselves.
-
-### Checking for an Entry
-
-`has($id)` is true when `get($id)` has something to return: a `set()` definition, a `bind()` chain that ends at one or at a class, or a class that can be instantiated. It follows bindings but creates nothing, so it does not check the constructor's parameters: `get()` can still fail with a `ContainerException`. When `has()` is false, `get()` throws a `NotFoundException`. An id on a cycle of bindings counts as known but broken: `has()` is true, and `get()` throws a `ContainerException`.
-
-```php
-if ($container->has(CacheInterface::class)) {
-    $cache = $container->get(CacheInterface::class);
-}
-```
-
-### Static Analysis
-
-`get()` is typed for PHPStan: with a class name it returns that class, with any other id `mixed`.
-
-```php
-$logger = $container->get(Logger::class);   // Logger
-$name = $container->get('app.name');        // mixed
-```
-
-This holds for every way an entry is made. A `set()` factory registered under a class or interface name has to return an instance of it, and so has the entry a binding ends at: `get()` throws a `ContainerException` otherwise (`null` included). PHPStan reports a type check on the result (`assert($logger instanceof Logger)`) as always true, and rightly so.
+| Key | Type | Default | Allowed | Refused |
+|---|---|---|---|---|
+| `$config` (constructor, `create()`) | `array{}` | `[]` | `[]` | any other array: `ContainerException` |
 
 ## Hooks
 
-The container fires events at key points, allowing you to add logging, monitoring, or debugging without modifying your services.
+| Event | When | Payload |
+|---|---|---|
+| `resolve` | A new entry has been stored; not when an existing entry is returned | `id` (string), `instance` (mixed) |
+| `error` | `get()` detects a failure, before it throws | `id` (string), `exception` (Throwable) |
 
-### Available Events
-
-| Event | When | Data |
-|-------|------|------|
-| `resolve` | New entry created | `['id' => string, 'instance' => mixed]` (whatever a `set()` factory returned) |
-| `error` | `get()` fails | `['id' => string, 'exception' => Throwable]` |
-
-`on()` throws a `ContainerException` for any other event name. A subclass that fires events of its own with `trigger()` lists them: `protected const array EVENTS = [...parent::EVENTS, 'boot'];`
-
-### Usage
-
-```php
-$container = new Container();
-
-// Log all resolved services; json_encode() escapes what an id could break a log line with
-$container->on('resolve', function (array $data) {
-    error_log('Resolved: ' . json_encode($data['id']));
-});
-
-// Log errors: the class of the exception, not its message, which may quote a connection string
-$container->on('error', function (array $data) {
-    error_log('Container error: ' . json_encode(['id' => $data['id'], 'exception' => $data['exception']::class]));
-});
-```
-
-**Note:** Hooks only fire when a new instance is created. Singleton cache hits (returning an already-resolved instance) do not trigger `resolve`. An id resolved through `bind()` fires `resolve` for the implementation, not for the interface. `resolve` fires once the entry exists, so dependencies come first: for a `Controller` that needs a `Service` that needs a `Logger`, the order is `Logger`, `Service`, `Controller`.
-
-`error` fires once where the container detects the failure, also when the caller catches the exception. An exception thrown by a `resolve` hook is not reported where it happens; when it reaches a factory that asked for the entry, it is reported as that factory's failure. `id` is the entry that could not be created (a missing dependency, not the class that needs it), `exception` is the original exception of a factory or constructor, otherwise the container's own. A factory that fails because an entry it requested failed is reported as well. An `error` hook may use the container, but should catch what `get()` throws there: while an `error` hook runs, further failures are not reported to any `error` hook, and asking for the entry that is just being created fails as a circular dependency. `set()` and `bind()` throw there, as anywhere while `get()` runs: register a replacement after `get()` has failed.
-
-Hooks fail hard: whatever a `resolve` hook throws makes `get()` fail, as a `ContainerException` with the message `Resolve hook failed for 'X'.` (X is the entry whose hook failed). The hook's exception is in `getPrevious()` and described in `getDebugMessage()`; the message names the entry only, since the hook's text may carry values, and a `NotFoundExceptionInterface` from a hook would tell the caller that an entry `has()` is true for does not exist. It is not reported to the `error` hook. An entry whose `resolve` hook throws is not kept, nor is any entry created while that hook ran: one of them may hold the instance that never passed the hook (a class that needs it, a binding to it, a factory that asked for it). The next `get()` creates them anew, running factories, constructors and hooks again, and `set()` or `bind()` for them are accepted until then. Entries created before, the dependencies of the entry among them, stay. The undone entries are destroyed at once, as far as nothing else holds them (the hook's exception may hold the entry in the arguments of its trace); what a destructor throws then, also an exception from using the container, does not replace the failure but is added to `getDebugMessage()`. The same holds for the value of a factory that returned no instance of its class.
-
-A throwing `error` hook (a log sink that is down) does not hide the failure: `get()` throws an exception of the same class with the same message, the exception it was about to throw in `getPrevious()`, and in `getDebugMessage()` the debug message of that exception, if it has one, followed by what the hook threw (`...; the error hook threw Class in file:line: message`). The hook's exception itself is not kept.
-
-## Security
-
-### Never Pass User Input to `get()` or `has()`
-
-`get($id)` creates any autoloadable class whose constructor it can satisfy, and runs that constructor. An id taken from a request (a route parameter, a query string) lets the caller choose the class. `has($id)` is no allowlist either: it runs the autoloader for the id (the code at the top of a class file runs) and tells whether such a class exists. Map user input to a fixed list of ids yourself.
-
-### Exception Messages
-
-`getMessage()` names ids, classes and parameters, and nothing else. When a factory or constructor throws, the container's message says which entry failed, not what the exception said: that text may contain connection strings or paths. ASCII control characters in an id are escaped there (a line break shows as `\x0A`), so a line break in an id does not start a new line. Other characters pass unchanged, among them the Unicode line separators U+2028, U+2029 and U+0085, which some log readers split lines at: write log lines with `json_encode()` (as in the hook example above) or a structured logger. The `error` hook receives the id unchanged.
-
-The details are in `getDebugMessage()`: `Class in file:line: message` for the wrapped exception and every exception behind it, joined by ` <- `. It is `null` for failures the container detects itself, unless the `error` hook threw while they were reported or a destructor threw while a value was discarded. The original exception is available via `getPrevious()`, and the `error` hook receives it directly, unchanged: its message, and its trace with the arguments of every call unless `zend.exception_ignore_args` is on (it is in `php.ini-production`, not in development, nor without a `php.ini`, as in the official Docker images). Log these, show end users a generic message.
-
-Casting an exception to a string (`(string) $e`, which many loggers and error pages do) includes every exception in `getPrevious()` with its message and trace: what `getMessage()` keeps out comes back. Treat that string like the debug message.
+- `on()` throws for other events; a subclass lists its own in `EVENTS` (`[...parent::EVENTS, 'x']`), fires `trigger()`.
+- `resolve` fires for the entry a binding chain ends at, dependencies first; a hook that calls `get()` for it gets it.
+- A throwing `resolve` hook: `get()` throws `Resolve hook failed for 'X'.` (the hook's exception in `getPrevious()`);
+  only a factory that asked for the entry reports it to `error`, as its own failure. The entry and every entry
+  created while the hook ran are dropped and created anew by the next `get()`; their destructors' exceptions go to
+  `getDebugMessage()`.
+- `error` fires once, where the failure is detected. `id` is the entry that failed (a missing dependency, not the
+  class that needs it); `exception` is what a factory, constructor or default threw, otherwise the container's own.
+  While it runs, further failures are not reported to it. If it throws, `get()` throws the same class with the same
+  message, the original in `getPrevious()`, the hook's exception described in `getDebugMessage()`.
 
 ## Exceptions
 
-All exceptions implement PSR-11 interfaces:
+| Class | When |
+|---|---|
+| `NotFoundException` | `get()` of an id `has()` is false for, also at the end of a binding chain |
+| `ContainerException` | `get()`: a container to autowire, a parameter it cannot fill, a missing dependency, a cycle |
+| `ContainerException` | `get()`: a wrong type; a factory, constructor, default or `resolve` hook threw |
+| `ContainerException` | `set()`, `bind()`: see Registration; `on()`: unknown event |
+| `ContainerException` | `__construct()`, `create()`: a config array that is not empty |
 
-```php
-use Sodaho\Container\Container;
-use Sodaho\Container\Exception\ContainerException;
-use Sodaho\Container\Exception\NotFoundException;
+`NotFoundException` extends `ContainerException`; both implement the PSR-11 interfaces, `NotFoundException` adds
+no methods. What an autoloader or a class file throws passes `get()`, `has()` and `bind()` unchanged.
 
-try {
-    $service = $container->get(SomeService::class);
-} catch (NotFoundException $e) {
-    // Nothing the container can create for this id (has() is false)
-} catch (ContainerException $e) {
-    // Any other container error (unresolvable parameter, missing dependency, etc.)
-}
-```
+## Security
 
-| Exception | When |
-|-----------|------|
-| `NotFoundException` | `get()` for an id `has()` is false for: no such class or service, an interface without binding, a class that cannot be instantiated (abstract, an enum, constructor not public), also at the end of a binding. |
-| `ContainerException` | `get()`: a container to autowire (see The Container Itself), unresolvable parameter, a dependency the container cannot create (the `NotFoundException` is in `getPrevious()`), factory or constructor error, circular dependency (through constructors, bindings or factories), a factory under a class name that returns something else, a binding that ends at an entry of another type, an exception a `resolve` hook threw (in `getPrevious()`). `set()` / `bind()`: called while `get()` runs, the entry has been created, or an entry was created with the default value for this type. `bind()`: a class written otherwise than declared (another case, a leading `\`, a `class_alias()` name), or an implementation that neither implements nor extends the interface. `on()`: unknown event. Constructor and `create()`: a config array that is not empty. |
+- `get($id)` creates any autoloadable class whose constructor it can fill and runs that constructor; `has($id)` runs
+  the autoloader. Never pass user input as an id or class name: map it to a fixed list of ids.
+- `getMessage()` names ids, types and parameters only. The text of a wrapped exception (it may carry a DSN or a
+  path) is in `getDebugMessage()`, `getPrevious()` and the `error` hook's payload: log those, never show them.
+- ASCII control characters in an id are escaped in messages (a line break as `\x0A`); the `error` hook gets the id
+  unchanged. Unicode line separators (U+2028, U+2029, U+0085) pass: write log lines with `json_encode()`.
 
-`NotFoundException` extends `ContainerException`: catching `ContainerException` catches both.
+## Testing
 
-An exception thrown while a class is loaded (by an autoloader, or a syntax error in the class file) is not the container's: `get()`, `has()` and `bind()` let it pass unchanged.
+`composer test`, `composer analyse` (level max), `composer cs`, `composer validate --strict`; no environment variables.
 
-## Limitations
+## Upgrading
 
-The container is intentionally minimal:
-
-| Feature | Status | Alternative |
-|---------|--------|-------------|
-| Interface binding | **Supported** | `bind()` method |
-| Autowiring | **Supported** | Automatic via Reflection |
-| Singleton | **Supported** | Default behavior |
-| Factories | **Supported** | `set()` method |
-| Optional dependencies | **Supported** | Default value if the type cannot be provided |
-| Union types | A class with `null` or `false` like `?T`, others default only | Use `set()` for manual definition |
-| Intersection types | Default only | Use `set()` for manual definition |
-| Attributes | Not supported | Use `set()` for configuration |
-| Tagged services | Not supported | Not needed for simple DI |
-| Lazy objects | Not built in | PHP's own lazy objects (8.4) in a `set()` factory (see below) |
-| Compiler passes | Not supported | Framework territory |
-
-A lazy object from a `set()` factory (`ReflectionClass::newLazyProxy()`) is created by `get()`, but its initializer runs later, when the object is first used. What the initializer throws arrives there, unwrapped and not reported to the `error` hook, and the entry stays: the next use runs the initializer again.
-
-### Concurrency and Copies
-
-A container is meant for one request at a time. Fibers or coroutines that share one see each other's entries in creation: a second `get()` of an entry the first has not finished yet fails as a circular dependency (once the entry exists and only its `resolve` hook runs, it returns the entry), and `set()` or `bind()` throws while another one is inside `get()`. Use one container per request or coroutine, or create the shared entries before they start.
-
-`clone $container` copies the registrations and shares the entries created so far; entries created afterwards exist once in each copy. Hooks that captured the original container (`use ($container)`) keep using the original; factories get the container that runs them. Make copies outside of `get()`: a copy made in a factory or a hook carries the state of the `get()` that is running (the entries in creation, the lock on `set()` and `bind()`, an entry its `resolve` hook may still undo) and is not supported.
-
-## Requirements
-
-- PHP ^8.5
-- psr/container ^2.0
+See [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 
 MIT
-
-## Acknowledgments
 
 Parts of this project (refactoring, documentation, code review) were developed with AI assistance (Claude).
