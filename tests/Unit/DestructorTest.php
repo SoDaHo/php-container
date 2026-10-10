@@ -47,6 +47,32 @@ class DestructorTest extends TestCase
         }
     }
 
+    public function testEntryWhoseHookThrowsIsDestroyedDuringTheRollback(): void
+    {
+        // Without arguments in traces, nothing but the container holds the entry: its destructor runs in the rollback
+        $ignoreArgs = ini_set('zend.exception_ignore_args', '1');
+        try {
+            $container = new Container();
+            $container->on('resolve', function (array $data) {
+                if ($data['id'] === Fixtures\ThrowingDestructor::class) {
+                    throw new \RuntimeException('Hook failed');
+                }
+            });
+            Fixtures\ThrowingDestructor::$armed = true;
+
+            try {
+                $container->get(Fixtures\ThrowingDestructor::class);
+                $this->fail('Expected ContainerException');
+            } catch (ContainerException $e) {
+                $this->assertSame("Resolve hook failed for '" . Fixtures\ThrowingDestructor::class . "'.", $e->getMessage());
+                $this->assertStringContainsString('; A destructor threw while the container discarded it: LogicException in ', (string) $e->getDebugMessage());
+            }
+            $this->assertFalse(Fixtures\ThrowingDestructor::$armed, 'The destructor ran during the rollback');
+        } finally {
+            ini_set('zend.exception_ignore_args', (string) $ignoreArgs);
+        }
+    }
+
     public function testThrowingDestructorDuringTheRollbackLeavesTheHookFailureOnTop(): void
     {
         $container = new Container();
