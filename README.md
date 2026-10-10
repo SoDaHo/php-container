@@ -128,7 +128,7 @@ Once an entry has been created with the default, `set()` and `bind()` for that t
 
 ### The Container Itself
 
-The container autowires no container, itself included: autowiring would create a new, empty one, without the factories, bindings and hooks of the container that was asked. `get()` throws a `ContainerException` for a class that implements `ContainerInterface`, and for a constructor parameter that asks for a container nothing is registered for, optional or not. Register the container under the type the parameter names:
+The container autowires no container, itself included: autowiring would create a new, empty one, without the factories, bindings and hooks of the container that was asked. `get()` throws a `ContainerException` for a class that implements `ContainerInterface` and has no factory, and for a constructor parameter that asks for a container nothing is registered for, optional or not. Register the container under the type the parameter names:
 
 ```php
 $container->set(ContainerInterface::class, fn (Container $c) => $c);
