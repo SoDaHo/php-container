@@ -18,8 +18,8 @@ use Sodaho\Container\Traits\HasHooks;
  *
  * Invariants:
  * - Every entry is created once (a singleton) and stays; only an entry whose resolve hook throws is undone.
- * - An entry that exists or is being created cannot be redefined, nor can a type an entry got a default for:
- *   set() and bind() throw instead of registering something that would never be used.
+ * - Nothing can be registered while get() runs; an entry that exists cannot be redefined, nor can a type an entry
+ *   got a default for: set() and bind() throw instead of registering something that would never be used.
  * - Every id on a chain of bindings becomes an entry of its own when get() follows the chain.
  * - has() is true exactly for the ids get() has something to create for; when it is false, get() throws a
  *   NotFoundException (a cycle of bindings excepted).
@@ -49,8 +49,8 @@ class Container implements ContainerInterface
     /** @var array<string, true> Entries currently being created (for circular dependency detection) */
     private array $resolving = [];
 
-    /** @var array<string, true> Bindings get() is following to an entry that is being created */
-    private array $following = [];
+    /** How many get() calls are running: while one is, set() and bind() throw */
+    private int $depth = 0;
 
     /** @var array<string, array<string, true>> Types a created entry got a default for instead: type -> those entries */
     private array $defaulted = [];
@@ -112,7 +112,7 @@ class Container implements ContainerInterface
      * @param string $id The class name or identifier
      * @param callable $factory A closure that returns the instance: fn(Container $c) => new Service(...)
      *
-     * @throws ContainerException If the entry has been created or is being created
+     * @throws ContainerException If get() is running, the entry has been created, or an entry got a default for this type
      */
     public function set(string $id, callable $factory): void
     {
@@ -130,7 +130,7 @@ class Container implements ContainerInterface
      * @param string $interface The interface or abstract class name
      * @param class-string $implementation The concrete class name
      *
-     * @throws ContainerException If the entry has been created or is being created
+     * @throws ContainerException If get() is running, the entry has been created, or an entry got a default for this type
      */
     public function bind(string $interface, string $implementation): self
     {
@@ -142,12 +142,19 @@ class Container implements ContainerInterface
     }
 
     /**
-     * Entries are singletons: a definition for one that exists, or is on its way, would never be used.
+     * Entries are singletons: a definition for one that exists would never be used. While get() runs, a definition
+     * could change what the entries on their way get: some would see it, others not.
      */
     private function assertNotCreated(string $id): void
     {
-        if (array_key_exists($id, $this->instances) || isset($this->resolving[$id]) || isset($this->following[$id])) {
-            throw new ContainerException('Cannot redefine \'' . self::name($id) . "': the entry has been created or is being created.");
+        if ($this->depth > 0) {
+            throw new ContainerException(
+                'Cannot define \'' . self::name($id) . "' while get() is running: register definitions before it, not from a factory or a hook."
+            );
+        }
+
+        if (array_key_exists($id, $this->instances)) {
+            throw new ContainerException('Cannot redefine \'' . self::name($id) . "': the entry has been created.");
         }
 
         // An entry that got a default for this type would keep it: the definition would reach it as little
@@ -174,6 +181,19 @@ class Container implements ContainerInterface
      */
     public function get(string $id): mixed
     {
+        $this->depth++;
+        try {
+            return $this->entry($id);
+        } finally {
+            $this->depth--;
+        }
+    }
+
+    /**
+     * What get() returns: the entry for an id, created if need be.
+     */
+    private function entry(string $id): mixed
+    {
         // Follow bind() mappings to the entry that is created. Only that entry is guarded against
         // re-entry: a hook may ask for an interface while its implementation is being announced.
         $aliases = [];
@@ -188,13 +208,7 @@ class Container implements ContainerInterface
 
             // The end of the chain: its factory runs or the class is autowired (a class bound to itself is that, too)
             if (!isset($this->aliases[$target]) || $this->aliases[$target] === $target) {
-                $outer = $this->following;
-                $this->following += $aliases;
-                try {
-                    $instance = $this->make($target, array_keys($aliases));
-                } finally {
-                    $this->following = $outer;
-                }
+                $instance = $this->make($target, array_keys($aliases));
                 break;
             }
 

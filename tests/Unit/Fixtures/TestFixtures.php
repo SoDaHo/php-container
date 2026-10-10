@@ -469,3 +469,12 @@ class ServiceWithTwoOptionalsOfOneType
     ) {
     }
 }
+
+// ==================== A Default in Front of a Dependency Whose Factory Registers ====================
+
+class ServiceWithOptionalInterfaceThenService
+{
+    public function __construct(public ?ServiceInterface $service = null, public ?TestService $later = null)
+    {
+    }
+}

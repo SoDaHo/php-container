@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Changed
+
+- `set()` and `bind()` throw a `ContainerException` while `get()` runs, for any id: from a factory, a `resolve` or `error` hook, or a destructor that runs then. They used to throw only for the entries on the way; a factory could still bind a type an entry being created had already got the default for, and that entry kept the default without notice. The message is `Cannot define 'X' while get() is running: register definitions before it, not from a factory or a hook.`
+- The message for an entry that exists ends in `the entry has been created.` (was `... has been created or is being created.`).
+
 ## [2.0.1] - 2026-10-09
 
 ### Upgrading from 2.0.0

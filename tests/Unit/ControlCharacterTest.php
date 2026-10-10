@@ -51,7 +51,7 @@ class ControlCharacterTest extends TestCase
             $container->set("c\rd", fn () => null);
             $this->fail('Expected ContainerException');
         } catch (ContainerException $e) {
-            $this->assertSame('Cannot redefine \'c\x0Dd\': the entry has been created or is being created.', $e->getMessage());
+            $this->assertSame('Cannot redefine \'c\x0Dd\': the entry has been created.', $e->getMessage());
         }
 
         try {

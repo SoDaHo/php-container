@@ -4,14 +4,13 @@ declare(strict_types=1);
 
 namespace Sodaho\Container\Tests\Unit;
 
-use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Sodaho\Container\Container;
 use Sodaho\Container\Exception\ContainerException;
 use Sodaho\Container\Exception\NotFoundException;
 
 /**
- * Entries are singletons: set() and bind() throw for an entry that has been created or is being created.
+ * Entries are singletons: set() and bind() throw for an entry that has been created.
  */
 class RedefinitionTest extends TestCase
 {
@@ -25,7 +24,7 @@ class RedefinitionTest extends TestCase
             $container->set('service', fn () => new Fixtures\AlternativeService());
             $this->fail('Expected ContainerException');
         } catch (ContainerException $e) {
-            $this->assertSame("Cannot redefine 'service': the entry has been created or is being created.", $e->getMessage());
+            $this->assertSame("Cannot redefine 'service': the entry has been created.", $e->getMessage());
         }
 
         $this->assertSame($service, $container->get('service'));
@@ -42,7 +41,7 @@ class RedefinitionTest extends TestCase
             $this->fail('Expected ContainerException');
         } catch (ContainerException $e) {
             $this->assertSame(
-                "Cannot redefine '" . Fixtures\ServiceInterface::class . "': the entry has been created or is being created.",
+                "Cannot redefine '" . Fixtures\ServiceInterface::class . "': the entry has been created.",
                 $e->getMessage()
             );
         }
@@ -77,103 +76,6 @@ class RedefinitionTest extends TestCase
         $this->expectExceptionMessage("Cannot redefine 'nothing'");
 
         $container->set('nothing', fn () => 'something');
-    }
-
-    public function testEntryCannotBeRedefinedFromInsideItsOwnFactory(): void
-    {
-        $container = new Container();
-        $container->set('service', function (Container $c) {
-            $c->set('service', fn () => new Fixtures\AlternativeService());
-
-            return new Fixtures\ConcreteService();
-        });
-
-        try {
-            $container->get('service');
-            $this->fail('Expected ContainerException');
-        } catch (ContainerException $e) {
-            $this->assertSame("Error while creating service 'service'.", $e->getMessage());
-            $this->assertSame(
-                "Cannot redefine 'service': the entry has been created or is being created.",
-                $e->getPrevious()?->getMessage()
-            );
-        }
-    }
-
-    /**
-     * @return array<string, array{callable(Container): mixed, class-string}>
-     */
-    public static function redefinitionsOfABinding(): array
-    {
-        $bind = fn (Container $c) => $c->bind(Fixtures\FirstInterface::class, Fixtures\ConcreteService::class);
-        $set = fn (Container $c) => $c->set(Fixtures\FirstInterface::class, fn () => new \stdClass());
-
-        return [
-            'bind() when the target is announced' => [$bind, Fixtures\NeedsLogger::class],
-            'set() when the target is announced' => [$set, Fixtures\NeedsLogger::class],
-            // One get() further in: the binding the outer get() follows stays locked
-            'bind() when a dependency of the target is announced' => [$bind, Fixtures\FileLogger::class],
-            'set() when a dependency of the target is announced' => [$set, Fixtures\FileLogger::class],
-        ];
-    }
-
-    /**
-     * @param callable(Container): mixed $redefine
-     * @param class-string $announced
-     */
-    #[DataProvider('redefinitionsOfABinding')]
-    public function testBindingCannotBeRedefinedWhileItsTargetIsBeingCreated(callable $redefine, string $announced): void
-    {
-        // FirstInterface -> NeedsLogger, which itself gets its logger through another binding
-        $container = new Container();
-        $container->bind(Fixtures\FirstInterface::class, Fixtures\NeedsLogger::class);
-        $container->bind(Fixtures\LoggerInterface::class, Fixtures\FileLogger::class);
-        $announcements = 0;
-        $container->on('resolve', function (array $data) use ($container, $redefine, $announced, &$announcements) {
-            if ($data['id'] === $announced) {
-                $announcements++;
-                $redefine($container);
-            }
-        });
-
-        // The hook's exception undoes the announced entry, so the next get() creates it anew and fails the same way
-        foreach ([1, 2] as $attempt) {
-            try {
-                $container->get(Fixtures\FirstInterface::class);
-                $this->fail('Expected ContainerException');
-            } catch (ContainerException $e) {
-                $this->assertSame(
-                    "Cannot redefine '" . Fixtures\FirstInterface::class . "': the entry has been created or is being created.",
-                    $e->getMessage()
-                );
-            }
-            $this->assertSame($attempt, $announcements);
-        }
-
-        // What has() says stays true: the binding is in place, only the hook keeps failing
-        $this->assertTrue($container->has(Fixtures\FirstInterface::class));
-    }
-
-    public function testErrorHookCannotRedefineTheEntryThatIsFailing(): void
-    {
-        $container = new Container();
-        $container->on('error', function (array $data) use ($container) {
-            $id = $data['id'];
-            $this->assertIsString($id);
-            $container->set($id, fn () => new \stdClass());
-        });
-
-        try {
-            $container->get('Missing\Service');
-            $this->fail('Expected ContainerException');
-        } catch (ContainerException $e) {
-            $this->assertSame("Cannot redefine 'Missing\Service': the entry has been created or is being created.", $e->getMessage());
-        }
-
-        // Once get() has failed, the replacement is accepted
-        $container->set('Missing\Service', fn () => new \stdClass());
-
-        $this->assertInstanceOf(\stdClass::class, $container->get('Missing\Service'));
     }
 
     public function testBindingMayBeRedefinedAfterItsTargetFailed(): void

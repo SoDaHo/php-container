@@ -67,7 +67,7 @@ $container->set(Database::class, fn(Container $c) => new Database(
 $container->set('app.name', fn() => 'My Application');
 ```
 
-The last `set()` or `bind()` for an id wins. Register definitions and bindings before the first `get()` that reaches the id, directly, through a binding or as a dependency. Entries are singletons: a `set()` or `bind()` for an entry that has been created or is just being created throws a `ContainerException`. So does one for a type an entry was created with the default value for (see Optional Dependencies).
+The last `set()` or `bind()` for an id wins. Register definitions and bindings before the first `get()`. While `get()` runs, `set()` and `bind()` throw a `ContainerException`, for any id: a factory, a hook or a destructor that registers something then would change what some entries get and not others. Entries are singletons: a `set()` or `bind()` for an entry that has been created throws as well, and so does one for a type an entry was created with the default value for (see Optional Dependencies).
 
 ### Interface Binding
 
@@ -174,7 +174,7 @@ $container->on('error', function (array $data) {
 
 **Note:** Hooks only fire when a new instance is created. Singleton cache hits (returning an already-resolved instance) do not trigger `resolve`. An id resolved through `bind()` fires `resolve` for the implementation, not for the interface. `resolve` fires once the entry exists, so dependencies come first: for a `Controller` that needs a `Service` that needs a `Logger`, the order is `Logger`, `Service`, `Controller`.
 
-`error` fires once where the container detects the failure, also when the caller catches the exception (not for an exception thrown by a `resolve` hook, which leaves `get()` as it is): `id` is the entry that could not be created (a missing dependency, not the class that needs it), `exception` is the original exception of a factory or constructor, otherwise the container's own. A factory that fails because an entry it requested failed is reported as well. An `error` hook may use the container, but should catch what `get()` throws there: while an `error` hook runs, further failures are not reported to any `error` hook, and asking for the entry that is just being created fails as a circular dependency. `set()` or `bind()` for that entry throws there, too: register a replacement after `get()` has failed.
+`error` fires once where the container detects the failure, also when the caller catches the exception (not for an exception thrown by a `resolve` hook, which leaves `get()` as it is): `id` is the entry that could not be created (a missing dependency, not the class that needs it), `exception` is the original exception of a factory or constructor, otherwise the container's own. A factory that fails because an entry it requested failed is reported as well. An `error` hook may use the container, but should catch what `get()` throws there: while an `error` hook runs, further failures are not reported to any `error` hook, and asking for the entry that is just being created fails as a circular dependency. `set()` and `bind()` throw there, as anywhere while `get()` runs: register a replacement after `get()` has failed.
 
 Hooks fail hard: the container does not catch an exception thrown inside a hook (inside a `set()` factory it is wrapped like anything else the factory throws). An entry whose `resolve` hook throws is not kept, nor are bindings to it the hook asked for: the next `get()` runs the factory or constructor and the hook again, and `set()` or `bind()` for it are accepted until then. A throwing `error` hook replaces the exception `get()` was about to throw (for a missing dependency: the `NotFoundException` inside the `ContainerException`, if the hook throws a `NotFoundException` itself).
 
@@ -211,7 +211,7 @@ try {
 | Exception | When |
 |-----------|------|
 | `NotFoundException` | `get()` for an id `has()` is false for: no such class or service, an interface without binding, a class that cannot be instantiated (abstract, an enum, constructor not public), also at the end of a binding. A cycle of bindings is the exception: `has()` is false, `get()` throws a `ContainerException`. |
-| `ContainerException` | `get()`: unresolvable parameter, a dependency the container cannot create (the `NotFoundException` is in `getPrevious()`), factory or constructor error, circular dependency (through constructors, bindings or factories). `set()` / `bind()`: the entry has been created or is being created. `on()`: unknown event. Constructor and `create()`: a config array that is not empty. |
+| `ContainerException` | `get()`: unresolvable parameter, a dependency the container cannot create (the `NotFoundException` is in `getPrevious()`), factory or constructor error, circular dependency (through constructors, bindings or factories). `set()` / `bind()`: called while `get()` runs, the entry has been created, or an entry was created with the default value for this type. `on()`: unknown event. Constructor and `create()`: a config array that is not empty. |
 
 `NotFoundException` extends `ContainerException`: catching `ContainerException` catches both.
 
@@ -237,7 +237,7 @@ The container is intentionally minimal:
 
 ### Concurrency and Copies
 
-A container is meant for one request at a time. Fibers or coroutines that share one see each other's entries in creation: a second `get()` of an entry the first has not finished yet fails as a circular dependency. Use one container per request or coroutine, or create the shared entries before they start.
+A container is meant for one request at a time. Fibers or coroutines that share one see each other's entries in creation: a second `get()` of an entry the first has not finished yet fails as a circular dependency, and `set()` or `bind()` throws while another one is inside `get()`. Use one container per request or coroutine, or create the shared entries before they start.
 
 `clone $container` copies the registrations and shares the entries created so far; entries created afterwards exist once in each copy. Hooks that captured the original container (`use ($container)`) keep using the original; factories get the container that runs them.
 
