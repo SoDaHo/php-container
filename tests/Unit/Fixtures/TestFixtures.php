@@ -501,3 +501,40 @@ class ServiceWithOptionalPsrContainer
     {
     }
 }
+
+// ==================== A Class in a Union With null or false ====================
+
+class ServiceWithFalseUnion
+{
+    public function __construct(public ServiceInterface|false $service = false)
+    {
+    }
+}
+
+class ServiceWithFalseOrNullUnion
+{
+    public function __construct(public ServiceInterface|false|null $service = null)
+    {
+    }
+}
+
+class ServiceWithUnbuildableFalseUnion
+{
+    public function __construct(public ServiceWithConfig|false $service = false)
+    {
+    }
+}
+
+class ServiceWithFalseUnionNoDefault
+{
+    public function __construct(public TestService|false $service)
+    {
+    }
+}
+
+class ServiceWithClassOrStringUnion
+{
+    public function __construct(public TestService|string $value = 'default')
+    {
+    }
+}

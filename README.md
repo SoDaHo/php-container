@@ -120,6 +120,8 @@ class Mailer {
 
 A concrete class that exists but cannot be built (for example because it needs a string) is a wiring error and throws, default or not.
 
+A union of one class with `null` or `false` (`LoggerInterface|false $logger = false`) counts as that class, like `?LoggerInterface`; without a default it is required like `LoggerInterface`. Any other union type gets its default, and throws without one.
+
 Once an entry has been created with the default, `set()` and `bind()` for that type throw a `ContainerException`: the entry would keep its default and never see the definition. Register them before the first `get()`.
 
 ### The Container Itself
@@ -240,7 +242,7 @@ The container is intentionally minimal:
 | Singleton | **Supported** | Default behavior |
 | Factories | **Supported** | `set()` method |
 | Optional dependencies | **Supported** | Default value if the type cannot be provided |
-| Union types | Default only | Use `set()` for manual definition |
+| Union types | A class with `null` or `false` like `?T`, others default only | Use `set()` for manual definition |
 | Intersection types | Default only | Use `set()` for manual definition |
 | Attributes | Not supported | Use `set()` for configuration |
 | Tagged services | Not supported | Not needed for simple DI |

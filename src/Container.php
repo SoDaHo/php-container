@@ -556,7 +556,13 @@ class Container implements ContainerInterface
 
         $type = $param->getType();
 
-        // No type hint, Union Types or Intersection Types (not supported for simplicity)
+        // A class with null or false (T|false, T|false|null) is that class, like ?T: otherwise a binding for it
+        // would be passed over for the default, and a class that cannot be built would not be noticed
+        if ($type instanceof ReflectionUnionType) {
+            $type = self::classOf($type) ?? $type;
+        }
+
+        // No type hint, other Union Types or Intersection Types (not supported for simplicity)
         if (!$type instanceof ReflectionNamedType) {
             if (!$param->isDefaultValueAvailable()) {
                 $kind = match (true) {
@@ -590,6 +596,29 @@ class Container implements ContainerInterface
         }
 
         return $name;
+    }
+
+    /**
+     * The one class of a union that has nothing else but null and false, or null for any other union.
+     */
+    private static function classOf(ReflectionUnionType $union): ?ReflectionNamedType
+    {
+        $class = null;
+        foreach ($union->getTypes() as $type) {
+            if (!$type instanceof ReflectionNamedType) {
+                return null;
+            }
+            if (!$type->isBuiltin()) {
+                if ($class !== null) {
+                    return null;
+                }
+                $class = $type;
+            } elseif (!in_array($type->getName(), ['null', 'false'], true)) {
+                return null;
+            }
+        }
+
+        return $class;
     }
 
     /**
