@@ -19,8 +19,9 @@ use Sodaho\Container\Traits\HasHooks;
  * Invariants:
  * - An entry is kept once it is created (a singleton). Only an entry whose resolve hook throws is undone, with every
  *   entry created while that hook ran; the next get() creates them anew, so their constructors run again.
- * - Nothing can be registered while get() runs; an entry that exists cannot be redefined, nor can a type an entry
- *   got a default for: set() and bind() throw instead of registering something that would never be used.
+ * - No definition (set(), bind()) can be registered while get() runs; an entry that exists cannot be redefined,
+ *   nor can a type an entry got a default for: set() and bind() throw instead of registering something that would
+ *   never be used.
  * - Every id on a chain of bindings becomes an entry of its own when get() follows the chain.
  * - What get() returns for the name of a class or interface is an instance of it; anything else throws.
  * - has() is true for the ids get() has something to create for, and for an id on a cycle of bindings (known, but
@@ -509,8 +510,9 @@ class Container implements ContainerInterface
     }
 
     /**
-     * An id as exception messages name it: control characters escaped (a line break as \x0A), so that an id
-     * with a line break cannot add a line to a log that writes the message. Backslashes of class names stay.
+     * An id as exception messages name it: ASCII control characters (C0 and DEL) escaped (a line break as \x0A), so
+     * that an id with a line break cannot add a line to a log that writes the message. Unicode line separators
+     * pass. Backslashes of class names stay.
      */
     private static function name(string $id): string
     {

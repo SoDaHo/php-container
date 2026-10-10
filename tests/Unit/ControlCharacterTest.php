@@ -9,8 +9,8 @@ use Sodaho\Container\Container;
 use Sodaho\Container\Exception\ContainerException;
 
 /**
- * Ids in exception messages have their control characters escaped: an id with a line break cannot add a line
- * to a log that writes the message. The error hook gets the id as it is.
+ * Ids in exception messages have their ASCII control characters (C0 and DEL) escaped: an id with a line break cannot
+ * add a line to a log that writes the message. The error hook gets the id as it is.
  */
 class ControlCharacterTest extends TestCase
 {
