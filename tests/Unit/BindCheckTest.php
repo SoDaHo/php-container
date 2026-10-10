@@ -78,6 +78,29 @@ class BindCheckTest extends TestCase
         $container->bind(Fixtures\ServiceInterface::class, $alias);
     }
 
+    public function testFindingTheEntryOfANameThatIsNoClassRunsNoAutoloader(): void
+    {
+        // An autoloader registered later that throws for the name must not reach a get() of the existing entry
+        $id = 'Missing\FactoryName';
+        $container = new Container();
+        $container->set($id, fn () => 'value');
+        $values = [$container->get($id)];
+
+        $load = static function (string $name) use ($id): void {
+            if ($name === $id) {
+                throw new \RuntimeException('Autoloader failed');
+            }
+        };
+        spl_autoload_register($load);
+        try {
+            $values[] = $container->get($id);
+        } finally {
+            spl_autoload_unregister($load);
+        }
+
+        $this->assertSame(['value', 'value'], $values);
+    }
+
     public function testEntryCreatedBeforeItsClassExistedIsCheckedWhenItIsFound(): void
     {
         $class = Fixtures\LateLoaded\LateDeclared::class;

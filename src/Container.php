@@ -274,7 +274,8 @@ class Container implements ContainerInterface
 
         // What get() of a class returns is an instance of it. A new entry was checked when it was made; one created
         // before its class existed (a factory under a name that was no class yet) is checked when it is found.
-        if ($cached && (class_exists($target) || interface_exists($target)) && !$instance instanceof $target) {
+        // Only against a class that is loaded: finding an entry that exists runs no autoloader.
+        if ($cached && (class_exists($target, false) || interface_exists($target, false)) && !$instance instanceof $target) {
             throw $this->fail($target, new ContainerException(
                 'Cannot resolve \'' . self::name($target) . "': its entry is " . get_debug_type($instance) . ', not an instance of it.'
             ));
