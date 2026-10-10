@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Sodaho\Container;
 
 use Psr\Container\ContainerInterface;
-use Psr\Container\NotFoundExceptionInterface;
 use ReflectionClass;
 use ReflectionNamedType;
 use ReflectionParameter;
@@ -308,11 +307,10 @@ class Container implements ContainerInterface
             $this->trigger('resolve', ['id' => $id, 'instance' => $instance]);
         } catch (\Throwable $e) {
             $this->rollback($mark);
-            // has() is true for the entry: a NotFoundExceptionInterface would tell the caller it does not exist
-            if ($e instanceof NotFoundExceptionInterface) {
-                throw new ContainerException('Resolve hook failed for \'' . self::name($id) . "'.", 0, $e, self::describe($e));
-            }
-            throw $e;
+            // What a hook throws leaves get() as a ContainerException, as PSR-11 asks: the message names the entry
+            // only (the hook's text may carry values), the hook's exception is in getPrevious() and the debug message.
+            // A NotFoundExceptionInterface would also tell the caller that an entry has() is true for does not exist.
+            throw new ContainerException('Resolve hook failed for \'' . self::name($id) . "'.", 0, $e, self::describe($e));
         }
 
         return $instance;

@@ -108,7 +108,8 @@ class RegistrationDuringGetTest extends TestCase
                 $container->get(Fixtures\FirstInterface::class);
                 $this->fail('Expected ContainerException');
             } catch (ContainerException $e) {
-                $this->assertSame(self::message(Fixtures\FirstInterface::class), $e->getMessage());
+                $this->assertSame("Resolve hook failed for '$announced'.", $e->getMessage());
+                $this->assertSame(self::message(Fixtures\FirstInterface::class), $e->getPrevious()?->getMessage());
             }
             $this->assertSame($attempt, $announcements);
         }

@@ -12,6 +12,8 @@ use Sodaho\Container\Container;
  */
 class ResolveHookFailureTest extends TestCase
 {
+    use ResolveHookFailure;
+
     /**
      * A resolve hook that throws the first time it sees $id and lets everything else pass.
      *
@@ -33,16 +35,6 @@ class ResolveHookFailureTest extends TestCase
                 throw new \RuntimeException('Hook failed');
             }
         });
-    }
-
-    private function getFails(Container $container, string $id): void
-    {
-        try {
-            $container->get($id);
-            $this->fail('Expected RuntimeException');
-        } catch (\RuntimeException $e) {
-            $this->assertSame('Hook failed', $e->getMessage());
-        }
     }
 
     public function testEntryIsCreatedAnewAfterItsResolveHookThrew(): void
@@ -80,7 +72,7 @@ class ResolveHookFailureTest extends TestCase
         // The hook asks for the interface, which caches it as an entry, and fails afterwards
         $this->failOnce($container, Fixtures\CountingLogger::class, fn (Container $c) => $c->get(Fixtures\LoggerInterface::class));
 
-        $this->getFails($container, Fixtures\LoggerInterface::class);
+        $this->getFails($container, Fixtures\LoggerInterface::class, Fixtures\CountingLogger::class);
         $container->bind(Fixtures\LoggerInterface::class, Fixtures\FileLogger::class);
 
         $this->assertInstanceOf(Fixtures\FileLogger::class, $container->get(Fixtures\LoggerInterface::class));

@@ -59,18 +59,22 @@ class ResolveHookTest extends TestCase
         $this->assertEquals(1, $callCount);
     }
 
-    public function testHookExceptionBubblesUp(): void
+    public function testHookExceptionLeavesGetAsAContainerException(): void
     {
         $container = new Container();
+        $thrown = new \RuntimeException('Hook failed: secret-token');
+        $container->on('resolve', fn () => throw $thrown);
 
-        $container->on('resolve', function () {
-            throw new \RuntimeException('Hook failed');
-        });
-
-        $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessage('Hook failed');
-
-        $container->get(\stdClass::class);
+        try {
+            $container->get(\stdClass::class);
+            $this->fail('Expected ContainerException');
+        } catch (ContainerException $e) {
+            // The message names the entry only; the hook's text is in getPrevious() and the debug message
+            $this->assertSame(ContainerException::class, $e::class);
+            $this->assertSame("Resolve hook failed for 'stdClass'.", $e->getMessage());
+            $this->assertSame($thrown, $e->getPrevious());
+            $this->assertStringEndsWith(': Hook failed: secret-token', (string) $e->getDebugMessage());
+        }
     }
 
     public function testResolveHookReceivesWhateverAFactoryReturns(): void
@@ -131,9 +135,10 @@ class ResolveHookTest extends TestCase
 
         try {
             $container->get($id);
-            $this->fail('Expected RuntimeException');
-        } catch (\RuntimeException $e) {
-            $this->assertSame('Hook failed', $e->getMessage());
+            $this->fail('Expected ContainerException');
+        } catch (ContainerException $e) {
+            $this->assertSame("Resolve hook failed for '$id'.", $e->getMessage());
+            $this->assertSame('Hook failed', $e->getPrevious()?->getMessage());
         }
 
         $this->assertSame(0, $errors);

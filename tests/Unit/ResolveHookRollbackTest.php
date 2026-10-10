@@ -14,6 +14,8 @@ use Sodaho\Container\Exception\ContainerException;
  */
 class ResolveHookRollbackTest extends TestCase
 {
+    use ResolveHookFailure;
+
     /**
      * A resolve hook that, the first time it sees $id, runs $before and throws.
      *
@@ -29,16 +31,6 @@ class ResolveHookRollbackTest extends TestCase
                 throw new \RuntimeException('Hook failed');
             }
         });
-    }
-
-    private function getFails(Container $container, string $id): void
-    {
-        try {
-            $container->get($id);
-            $this->fail('Expected RuntimeException');
-        } catch (\RuntimeException $e) {
-            $this->assertSame('Hook failed', $e->getMessage());
-        }
     }
 
     public function testClassTheHookCreatedWithTheEntryIsUndoneAsWell(): void
