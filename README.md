@@ -90,7 +90,7 @@ $service = $container->get(PaymentService::class);
 // PaymentService receives FileLogger for LoggerInterface parameter
 ```
 
-`bind()` checks the classes it is given, as far as they exist: the implementation must implement or extend the interface, and the interface must be written as declared (another case or a leading `\` throws, since `get()` with that spelling would not find the binding). The implementation is stored as declared, so it is the same entry `get()` of that class returns. A name that does not exist (a typo) is accepted and fails at `get()`, as does an interface bound to itself. A chain of bindings (`A` to `B`, `B` to `C`) has to go from interface to subtype at each step, so classes that exist cannot form a cycle.
+`bind()` checks the classes it is given, as far as they exist: the implementation must implement or extend the interface, and the interface must be written as declared (another case or a leading `\` throws, since `get()` with that spelling would not find the binding). The implementation is stored as declared, so it is the same entry `get()` of that class returns. A name that does not exist (a typo) is accepted and fails at `get()`, as does an interface bound to itself. A chain of bindings (`A` to `B`, `B` to `C`) goes from interface to subtype at each step where the classes exist, so classes that exist cannot form a cycle.
 
 ### Singleton Behavior
 
@@ -206,7 +206,7 @@ A throwing `error` hook (a log sink that is down) does not hide the failure: `ge
 
 The details are in `getDebugMessage()`: `Class in file:line: message` for the wrapped exception and every exception behind it, joined by ` <- `. It is `null` for failures the container detects itself, unless the `error` hook threw while they were reported. The original exception is available via `getPrevious()`, and the `error` hook receives it directly, unchanged: its message, and its trace with the arguments of every call unless `zend.exception_ignore_args` is on (it is in `php.ini-production`, not in development, nor without a `php.ini`, as in the official Docker images). Log these, show end users a generic message.
 
-Casting an exception to a string (`(string) $e`, which many loggers and error pages do) appends every exception in `getPrevious()` with its message and trace: what `getMessage()` keeps out comes back. Treat that string like the debug message.
+Casting an exception to a string (`(string) $e`, which many loggers and error pages do) includes every exception in `getPrevious()` with its message and trace: what `getMessage()` keeps out comes back. Treat that string like the debug message.
 
 ## Exceptions
 
