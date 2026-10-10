@@ -478,3 +478,26 @@ class ServiceWithOptionalInterfaceThenService
     {
     }
 }
+
+// ==================== Services That Ask for a Container ====================
+
+class ServiceNeedingContainer
+{
+    public function __construct(public \Sodaho\Container\Container $container)
+    {
+    }
+}
+
+class ServiceNeedingPsrContainer
+{
+    public function __construct(public \Psr\Container\ContainerInterface $container)
+    {
+    }
+}
+
+class ServiceWithOptionalPsrContainer
+{
+    public function __construct(public ?\Psr\Container\ContainerInterface $container = null)
+    {
+    }
+}

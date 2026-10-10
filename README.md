@@ -122,6 +122,16 @@ A concrete class that exists but cannot be built (for example because it needs a
 
 Once an entry has been created with the default, `set()` and `bind()` for that type throw a `ContainerException`: the entry would keep its default and never see the definition. Register them before the first `get()`.
 
+### The Container Itself
+
+The container autowires no container, itself included: autowiring would create a new, empty one, without the factories, bindings and hooks of the container that was asked. `get()` throws a `ContainerException` for a class that implements `ContainerInterface`, and for a constructor parameter that asks for a container nothing is registered for, optional or not. Register the container under the type the parameter names:
+
+```php
+$container->set(ContainerInterface::class, fn (Container $c) => $c);
+```
+
+PSR-11 advises against handing the container to services; where you can, pass the services themselves.
+
 ### Checking for an Entry
 
 `has($id)` is true when `get($id)` has something to return: a `set()` definition, a `bind()` chain that ends at one or at a class, or a class that can be instantiated. It follows bindings but creates nothing, so it does not check the constructor's parameters: `get()` can still fail with a `ContainerException`. When `has()` is false, `get()` throws a `NotFoundException`. An id on a cycle of bindings counts as known but broken: `has()` is true, and `get()` throws a `ContainerException`.
@@ -213,7 +223,7 @@ try {
 | Exception | When |
 |-----------|------|
 | `NotFoundException` | `get()` for an id `has()` is false for: no such class or service, an interface without binding, a class that cannot be instantiated (abstract, an enum, constructor not public), also at the end of a binding. |
-| `ContainerException` | `get()`: unresolvable parameter, a dependency the container cannot create (the `NotFoundException` is in `getPrevious()`), factory or constructor error, circular dependency (through constructors, bindings or factories). `set()` / `bind()`: called while `get()` runs, the entry has been created, or an entry was created with the default value for this type. `on()`: unknown event. Constructor and `create()`: a config array that is not empty. |
+| `ContainerException` | `get()`: a container to autowire (see The Container Itself), unresolvable parameter, a dependency the container cannot create (the `NotFoundException` is in `getPrevious()`), factory or constructor error, circular dependency (through constructors, bindings or factories). `set()` / `bind()`: called while `get()` runs, the entry has been created, or an entry was created with the default value for this type. `on()`: unknown event. Constructor and `create()`: a config array that is not empty. |
 
 `NotFoundException` extends `ContainerException`: catching `ContainerException` catches both.
 

@@ -467,6 +467,15 @@ class Container implements ContainerInterface
             throw $this->fail($id, new NotFoundException('Class \'' . self::name($id) . "' is not instantiable: $reason."));
         }
 
+        // A container created by autowiring is a new, empty one: whatever asks for it would bypass every factory,
+        // binding and hook of this one without notice
+        if ($reflector->implementsInterface(ContainerInterface::class)) {
+            throw $this->fail($id, new ContainerException(
+                'Cannot autowire \'' . self::name($id) . "': it is a container, and autowiring would create a new, empty one. "
+                . 'Register the container for it: set(\\' . self::name($id) . '::class, fn (Container $c) => $c).'
+            ));
+        }
+
         $parameters = $reflector->getConstructor()?->getParameters() ?? [];
 
         // Every parameter is checked before the first dependency is created
@@ -483,6 +492,10 @@ class Container implements ContainerInterface
 
             // No class dependency, or an optional one nothing is bound to and the container cannot create: the default
             if ($depId === null || ($param->isOptional() && !isset($this->aliases[$depId]) && !$this->has($depId))) {
+                // An optional container would be null although a container is right there: as silent as a new one
+                if ($depId !== null && is_a($depId, ContainerInterface::class, true)) {
+                    throw $this->fail($depId, $this->containerNotRegistered($id, $param, $depId));
+                }
                 $arguments[] = $this->defaultValue($id, $param);
                 if ($depId !== null) {
                     $this->defaulted[$depId][$id] = true;
@@ -496,6 +509,10 @@ class Container implements ContainerInterface
             try {
                 $arguments[] = $this->get($depId);
             } catch (NotFoundException $e) {
+                if (is_a($depId, ContainerInterface::class, true)) {
+                    throw $this->containerNotRegistered($id, $param, $depId, $e);
+                }
+
                 throw new ContainerException(
                     'Cannot resolve dependency \'' . self::name($depId) . "' for parameter '{$param->getName()}' in class '" . self::name($id) . "'.",
                     0,
@@ -509,6 +526,20 @@ class Container implements ContainerInterface
         } catch (\Throwable $e) {
             throw $this->instantiationFailed($id, $e);
         }
+    }
+
+    /**
+     * A parameter asks for a container interface nothing is registered for. The container does not register itself:
+     * which container a service gets is the application's choice, so the message says how to make it.
+     */
+    private function containerNotRegistered(string $id, ReflectionParameter $param, string $depId, ?\Throwable $previous = null): ContainerException
+    {
+        return new ContainerException(
+            "Cannot resolve parameter '{$param->getName()}' in class '" . self::name($id) . "': '" . self::name($depId)
+            . "' is a container, which is not autowired. Register it: set(\\" . self::name($depId) . '::class, fn (Container $c) => $c).',
+            0,
+            $previous
+        );
     }
 
     /**
