@@ -45,7 +45,7 @@ Registration:
 - `bind()` loads the implementation, then the interface. A name that exists must be written as declared (another
   case, a leading `\` or a `class_alias()` name throws); where both exist, the implementation must implement or
   extend the interface. A name no class has is taken as written: a typo in the implementation makes `get()` throw a
-  `NotFoundException`, a typo in the interface leaves a binding that only that spelling finds.
+  `NotFoundException`, a typo in the interface registers a binding under the typo.
 
 Autowiring, per constructor parameter:
 
@@ -63,15 +63,14 @@ Autowiring, per constructor parameter:
   A default is evaluated only when it is used.
 - A type written in another case than declared gets the class's entry once PHP has the class loaded.
 - To pass the container itself: `$container->set(ContainerInterface::class, fn (Container $c) => $c);`
-
-Results:
 - `get()` of a class or interface name returns an instance of it or throws (a factory or binding that yields another
   type, `null` included). PHPStan types `get(Foo::class)` as `Foo`, any other id as `mixed`.
 - `has()` is true for an id with a factory, an instantiable class, a binding chain that ends at one of them, and an
   id on a cycle of bindings (`get()` then throws). It runs the autoloader and checks no constructor parameters.
 - One container serves one request at a time: fibers sharing one make each other's `set()` and `bind()` throw, and a
   second `get()` of an entry still in creation fails as a circular dependency.
-- `clone` copies registrations, shares entries created so far; a copy made in `get()` keeps its `set()`/`bind()` lock.
+- Clone between `get()` calls: the copy gets the registrations and the entries created so far. A copy made inside
+  `get()` keeps the running state: its `set()`/`bind()` lock, the ids in creation, entries the original then undoes.
 
 ### ContainerException, NotFoundException
 
@@ -86,8 +85,7 @@ public function getDebugMessage(): ?string
 
 ### HasHooks (trait)
 
-`on(string $event, callable $callback): static` appends a callback; the protected `trigger()` runs the callbacks
-of an event in order and lets their exceptions pass.
+`on(string $event, callable $callback): static` appends a callback; protected `trigger()` calls them in order.
 
 ## Configuration
 
@@ -104,14 +102,15 @@ of an event in order and lets their exceptions pass.
 
 - `on()` throws for other events; a subclass lists its own in `EVENTS` (`[...parent::EVENTS, 'x']`), fires `trigger()`.
 - `resolve` fires for the entry a binding chain ends at, dependencies first; a hook that calls `get()` for it gets it.
-- A throwing `resolve` hook: `get()` throws `Resolve hook failed for 'X'.` (the hook's exception in `getPrevious()`);
-  only a factory that asked for the entry reports it to `error`, as its own failure. The entry and every entry
-  created while the hook ran are dropped and created anew by the next `get()`; their destructors' exceptions go to
-  `getDebugMessage()`.
-- `error` fires once, where the failure is detected. `id` is the entry that failed (a missing dependency, not the
-  class that needs it); `exception` is what a factory, constructor or default threw, otherwise the container's own.
-  While it runs, further failures are not reported to it. If it throws, `get()` throws the same class with the same
-  message, the original in `getPrevious()`, the hook's exception described in `getDebugMessage()`.
+- A throwing `resolve` hook: `get()` throws `Resolve hook failed for 'X'.` (the hook's exception in `getPrevious()`).
+  That failure is not reported to `error`; if it escapes a factory or constructor, that outer failure is reported.
+  The entry and every entry created while the hook ran are dropped and created anew by the next `get()`; what a
+  destructor running during the drop throws is added to `getDebugMessage()`.
+- `error` fires for each failure where it is detected, and again for each factory or constructor the failure leaves
+  (nested factories report on the way up). `id` is the entry that failed (a missing dependency, not the class that
+  needs it); `exception` is what a factory, constructor or default threw, otherwise the container's own. While it
+  runs, further failures are not reported to it. If it throws, `get()` throws the same class with the same message,
+  the original in `getPrevious()`, the hook's exception described in `getDebugMessage()`.
 
 ## Exceptions
 
@@ -124,14 +123,14 @@ of an event in order and lets their exceptions pass.
 | `ContainerException` | `__construct()`, `create()`: a config array that is not empty |
 
 `NotFoundException` extends `ContainerException`; both implement the PSR-11 interfaces, `NotFoundException` adds
-no methods. What an autoloader or a class file throws passes `get()`, `has()` and `bind()` unchanged.
+no methods. What an autoloader throws while the container loads a class passes `get()`, `has()`, `bind()` unchanged.
 
 ## Security
 
 - `get($id)` creates any autoloadable class whose constructor it can fill and runs that constructor; `has($id)` runs
   the autoloader. Never pass user input as an id or class name: map it to a fixed list of ids.
-- `getMessage()` names ids, types and parameters only. The text of a wrapped exception (it may carry a DSN or a
-  path) is in `getDebugMessage()`, `getPrevious()` and the `error` hook's payload: log those, never show them.
+- `getMessage()` does not carry what a wrapped exception says (it may hold a DSN or a path); that text is in
+  `getDebugMessage()`, `getPrevious()` and the `error` hook's payload: log those, do not show them to users.
 - ASCII control characters in an id are escaped in messages (a line break as `\x0A`); the `error` hook gets the id
   unchanged. Unicode line separators (U+2028, U+2029, U+0085) pass: write log lines with `json_encode()`.
 
