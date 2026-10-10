@@ -90,7 +90,7 @@ $service = $container->get(PaymentService::class);
 // PaymentService receives FileLogger for LoggerInterface parameter
 ```
 
-`bind()` checks the classes it is given, as far as they exist: the implementation must implement or extend the interface, and the interface must be written as declared (another case or a leading `\` throws, since `get()` with that spelling would not find the binding). The implementation is stored as declared, so it is the same entry `get()` of that class returns. A name that does not exist (a typo) is accepted and fails at `get()`, as does an interface bound to itself. A chain of bindings (`A` to `B`, `B` to `C`) goes from interface to subtype at each step where the classes exist, so classes that exist cannot form a cycle.
+`bind()` loads both classes it is given (the autoloader runs then, and what it throws leaves `bind()`) and checks them as far as they exist: the implementation must implement or extend the interface, and both must be written as declared. Another case, a leading `\` or the name of a `class_alias()` throws: `get()` looks ids up as written and would not find the binding under that spelling, and a factory registered under the name would be passed over. A name that does not exist (a typo) is accepted and fails at `get()`, as does an interface bound to itself; so does a name in another case that an autoloader cannot find under that spelling (PSR-4 on a case-sensitive file system). A chain of bindings (`A` to `B`, `B` to `C`) goes from interface to subtype at each step where the classes exist, so classes that exist cannot form a cycle.
 
 ### Singleton Behavior
 
@@ -233,7 +233,7 @@ try {
 
 `NotFoundException` extends `ContainerException`: catching `ContainerException` catches both.
 
-An exception thrown while a class is loaded (by an autoloader, or a syntax error in the class file) is not the container's: `get()` and `has()` let it pass unchanged.
+An exception thrown while a class is loaded (by an autoloader, or a syntax error in the class file) is not the container's: `get()`, `has()` and `bind()` let it pass unchanged.
 
 ## Limitations
 

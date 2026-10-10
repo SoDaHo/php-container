@@ -45,14 +45,63 @@ class BindCheckTest extends TestCase
         $container->bind(Fixtures\SecondInterface::class, Fixtures\FirstInterface::class);
     }
 
-    public function testImplementationIsStoredUnderItsDeclaredName(): void
+    public function testImplementationWrittenOtherwiseThanDeclaredIsRejected(): void
     {
         $container = new Container();
+
+        $this->expectException(ContainerException::class);
+        $this->expectExceptionMessage(
+            "Cannot bind '" . Fixtures\ServiceInterface::class . '\' to \'sodaho\container\tests\unit\fixtures\concreteservice\': name it as declared, \''
+            . Fixtures\ConcreteService::class . "'."
+        );
+
         // The class written in another case on purpose
         $container->bind(Fixtures\ServiceInterface::class, 'sodaho\container\tests\unit\fixtures\concreteservice');
+    }
 
-        // One entry for the class: the one get() of the class creates
-        $this->assertSame($container->get(Fixtures\ConcreteService::class), $container->get(Fixtures\ServiceInterface::class));
+    public function testImplementationNamedByAClassAliasIsRejectedRatherThanPassingOverItsFactory(): void
+    {
+        // A factory under the alias: renaming the binding to the declared class would autowire past it
+        $alias = 'Sodaho\Container\Tests\Unit\Fixtures\LegacyConcreteService';
+        if (!class_exists($alias, false)) {
+            class_alias(Fixtures\ConcreteService::class, $alias);
+        }
+        $container = new Container();
+        $container->set($alias, fn () => new Fixtures\ConcreteService());
+
+        $this->expectException(ContainerException::class);
+        $this->expectExceptionMessage(
+            "Cannot bind '" . Fixtures\ServiceInterface::class . "' to '$alias': name it as declared, '" . Fixtures\ConcreteService::class . "'."
+        );
+
+        // @phpstan-ignore argument.type (the name of a class_alias(), which PHPStan does not know)
+        $container->bind(Fixtures\ServiceInterface::class, $alias);
+    }
+
+    public function testEntryCreatedBeforeItsClassExistedIsCheckedWhenItIsFound(): void
+    {
+        $class = Fixtures\LateLoaded\LateDeclared::class;
+        $container = new Container();
+        $container->set($class, fn () => null);
+        // No class of that name yet: the factory's null is the entry of a name (asked for as a plain string id)
+        $get = fn (string $id): mixed => $container->get($id);
+        $this->assertNull($get($class));
+
+        $load = static function (string $name) use ($class): void {
+            if ($name === $class) {
+                require __DIR__ . '/Fixtures/LateLoaded/late_declared.php';
+            }
+        };
+        spl_autoload_register($load);
+        try {
+            $this->assertTrue(class_exists($class));
+
+            $this->expectException(ContainerException::class);
+            $this->expectExceptionMessage("Cannot resolve '$class': its entry is null, not an instance of it.");
+            $container->get($class);
+        } finally {
+            spl_autoload_unregister($load);
+        }
     }
 
     /**
