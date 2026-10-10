@@ -6,10 +6,12 @@ namespace Sodaho\Container\Tests\Unit\Fixtures;
 
 // ==================== Basic Services ====================
 
+// A class without dependencies
 class TestService
 {
 }
 
+// Needs one class: the simplest dependency
 class TestController
 {
     public function __construct(public TestService $service)
@@ -17,6 +19,7 @@ class TestController
     }
 }
 
+// Needs a class that needs a class: two levels of dependencies
 class DeepController
 {
     public function __construct(public TestController $controller)
@@ -26,6 +29,7 @@ class DeepController
 
 // ==================== Services with Config ====================
 
+// Needs a string, which the container cannot provide
 class ServiceWithConfig
 {
     public function __construct(public string $apiKey)
@@ -33,6 +37,7 @@ class ServiceWithConfig
     }
 }
 
+// A class dependency in front of a string the container cannot provide
 class ServiceWithDependencyBeforePrimitive
 {
     public function __construct(public TestService $service, public string $apiKey)
@@ -40,6 +45,7 @@ class ServiceWithDependencyBeforePrimitive
     }
 }
 
+// Primitive parameters with defaults
 class ServiceWithDefaults
 {
     public function __construct(
@@ -51,10 +57,12 @@ class ServiceWithDefaults
 
 // ==================== Optional/Nullable Dependencies ====================
 
+// An interface nothing implements
 interface NonExistentInterface
 {
 }
 
+// An optional dependency on an interface nothing implements
 class ServiceWithOptionalDep
 {
     public function __construct(public ?NonExistentInterface $optional = null)
@@ -64,6 +72,7 @@ class ServiceWithOptionalDep
 
 // ==================== Type Edge Cases ====================
 
+// A union of primitives with a default
 class ServiceWithUnionDefault
 {
     public function __construct(public string|int $value = 'default')
@@ -71,6 +80,7 @@ class ServiceWithUnionDefault
     }
 }
 
+// A union of primitives without a default
 class ServiceWithUnionNoDefault
 {
     public function __construct(public string|int $value)
@@ -78,10 +88,12 @@ class ServiceWithUnionNoDefault
     }
 }
 
+// An interface that extends two: the target of an intersection type
 interface CountableService extends ServiceInterface, \Countable
 {
 }
 
+// An intersection type with null and a default
 class ServiceWithIntersectionNullableDefault
 {
     public function __construct(public (ServiceInterface&\Countable)|null $value = null)
@@ -89,6 +101,7 @@ class ServiceWithIntersectionNullableDefault
     }
 }
 
+// An intersection type without a default
 class ServiceWithIntersectionNoDefault
 {
     public function __construct(public ServiceInterface&\Countable $value)
@@ -96,6 +109,7 @@ class ServiceWithIntersectionNoDefault
     }
 }
 
+// A parameter without a type, with a default
 class ServiceWithNoTypeDefault
 {
     // @phpstan-ignore missingType.parameter (no type on purpose: the container sees no type here)
@@ -104,6 +118,7 @@ class ServiceWithNoTypeDefault
     }
 }
 
+// A parameter without a type and without a default
 class ServiceWithNoTypeNoDefault
 {
     // @phpstan-ignore missingType.parameter (no type on purpose: the container sees no type here)
@@ -119,10 +134,12 @@ abstract class AbstractService implements ServiceInterface
 {
 }
 
+// The interface most bindings in the tests are made for
 interface ServiceInterface
 {
 }
 
+// The start of a chain of bindings
 interface FirstInterface
 {
 }
@@ -138,10 +155,12 @@ class ConcreteService implements SecondInterface
 {
 }
 
+// A second implementation of ServiceInterface
 class AlternativeService implements ServiceInterface
 {
 }
 
+// Needs ServiceInterface: a dependency only a binding or factory can fill
 class ControllerWithInterface
 {
     public function __construct(public ServiceInterface $service)
@@ -149,16 +168,19 @@ class ControllerWithInterface
     }
 }
 
+// A second interface for bindings
 interface LoggerInterface
 {
 }
 
+// Implements LoggerInterface
 class FileLogger implements LoggerInterface
 {
 }
 
 // ==================== Circular Dependencies ====================
 
+// Needs CircularB, which needs it: a cycle through constructors
 class CircularA
 {
     public function __construct(public CircularB $b)
@@ -166,6 +188,7 @@ class CircularA
     }
 }
 
+// Needs CircularA, which needs it: a cycle through constructors
 class CircularB
 {
     public function __construct(public CircularA $a)
@@ -173,6 +196,7 @@ class CircularB
     }
 }
 
+// Needs itself
 class SelfDependent
 {
     public function __construct(public SelfDependent $self)
@@ -182,6 +206,7 @@ class SelfDependent
 
 // ==================== Variadic Parameters ====================
 
+// A variadic parameter, which is not autowired
 class ServiceWithVariadic
 {
     /** @var TestService[] */
@@ -195,6 +220,7 @@ class ServiceWithVariadic
 
 // ==================== Constructor Exception ====================
 
+// Its constructor throws
 class ServiceThrowsInConstructor
 {
     public function __construct()
@@ -205,12 +231,14 @@ class ServiceThrowsInConstructor
 
 // ==================== Optional Dependencies the Container Cannot Create ====================
 
+// An enum: a type the container cannot create
 enum Mode
 {
     case Fast;
     case Safe;
 }
 
+// An enum parameter with a default
 class ServiceWithEnumDefault
 {
     public function __construct(public Mode $mode = Mode::Safe)
@@ -218,6 +246,7 @@ class ServiceWithEnumDefault
     }
 }
 
+// An optional dependency on an abstract class
 class ServiceWithOptionalAbstract
 {
     public function __construct(public ?AbstractService $service = null)
@@ -225,6 +254,7 @@ class ServiceWithOptionalAbstract
     }
 }
 
+// An optional dependency on a class that exists but cannot be built
 class ServiceWithOptionalBroken
 {
     public function __construct(public ?ServiceWithConfig $service = null)
@@ -232,6 +262,7 @@ class ServiceWithOptionalBroken
     }
 }
 
+// A nullable dependency without a default: required
 class ServiceWithNullableNoDefault
 {
     public function __construct(public ?NonExistentInterface $dep)
@@ -239,6 +270,7 @@ class ServiceWithNullableNoDefault
     }
 }
 
+// An optional dependency on ServiceInterface
 class ServiceWithOptionalInterface
 {
     public function __construct(public ?ServiceInterface $service = null)
@@ -246,6 +278,7 @@ class ServiceWithOptionalInterface
     }
 }
 
+// An object as default (new in initializer)
 class ServiceWithObjectDefault
 {
     public function __construct(public LoggerInterface $logger = new FileLogger())
@@ -265,6 +298,7 @@ class NeedsLogger implements FirstInterface, LoggerInterface
 
 // ==================== Defaults That Run Code ====================
 
+// Counts how often it is created
 class CountingLogger implements LoggerInterface
 {
     public static int $created = 0;
@@ -275,6 +309,7 @@ class CountingLogger implements LoggerInterface
     }
 }
 
+// Its default is a CountingLogger: shows whether the default was evaluated
 class ServiceWithCountingDefault
 {
     public function __construct(public LoggerInterface $logger = new CountingLogger())
@@ -282,6 +317,7 @@ class ServiceWithCountingDefault
     }
 }
 
+// Its constructor throws: a default that fails
 class ThrowingLogger implements LoggerInterface
 {
     public function __construct()
@@ -290,6 +326,7 @@ class ThrowingLogger implements LoggerInterface
     }
 }
 
+// An optional dependency whose default throws
 class ServiceWithThrowingDefault
 {
     public function __construct(public LoggerInterface $logger = new ThrowingLogger())
@@ -297,6 +334,7 @@ class ServiceWithThrowingDefault
     }
 }
 
+// A parameter without a type whose default throws
 class ServiceWithThrowingUntypedDefault
 {
     // @phpstan-ignore missingType.parameter (no type on purpose: the container sees no type here)
@@ -305,6 +343,7 @@ class ServiceWithThrowingUntypedDefault
     }
 }
 
+// A parameter without a type whose default is an object
 class ServiceWithUntypedObjectDefault
 {
     // @phpstan-ignore missingType.parameter (no type on purpose: the container sees no type here)
@@ -313,6 +352,7 @@ class ServiceWithUntypedObjectDefault
     }
 }
 
+// A parameter without a type whose default is an enum case
 class ServiceWithUntypedEnumDefault
 {
     // @phpstan-ignore missingType.parameter (no type on purpose: the container sees no type here)
@@ -323,6 +363,7 @@ class ServiceWithUntypedEnumDefault
 
 // ==================== A Logger That Cannot Be Built ====================
 
+// A logger that needs an interface nothing implements: a binding that cannot be built
 class LoggerNeedingTransport implements LoggerInterface
 {
     public function __construct(public NonExistentInterface $transport)
@@ -332,6 +373,7 @@ class LoggerNeedingTransport implements LoggerInterface
 
 // ==================== A Default That Relies on an Earlier Dependency ====================
 
+// Records that it was created
 class BootedService
 {
     public static bool $booted = false;
@@ -342,6 +384,7 @@ class BootedService
     }
 }
 
+// Throws unless BootedService was created before it
 class NeedsBootedService
 {
     public function __construct()
@@ -352,6 +395,7 @@ class NeedsBootedService
     }
 }
 
+// A default that relies on the dependency in front of it
 class ServiceWithDefaultAfterDependency
 {
     // @phpstan-ignore missingType.parameter (no type on purpose: the container sees no type here)
@@ -362,6 +406,7 @@ class ServiceWithDefaultAfterDependency
 
 // ==================== A Factory That Uses the Container When It Is Destroyed ====================
 
+// A factory object whose destructor asks the container for an entry
 class FactoryThatAsksOnDestruct
 {
     public function __construct(private \Sodaho\Container\Container $container, private string $id)
@@ -381,6 +426,7 @@ class FactoryThatAsksOnDestruct
 
 // ==================== A Container That Provides an Entry Itself ====================
 
+// A subclass that provides ServiceInterface itself, through get() and has()
 class ContainerWithFallback extends \Sodaho\Container\Container
 {
     public function __construct(private ServiceInterface $service)
@@ -401,6 +447,7 @@ class ContainerWithFallback extends \Sodaho\Container\Container
 
 // ==================== A Container With an Event of Its Own ====================
 
+// A subclass with an event of its own
 class ContainerWithBootEvent extends \Sodaho\Container\Container
 {
     protected const array EVENTS = [...parent::EVENTS, 'boot'];
@@ -413,6 +460,7 @@ class ContainerWithBootEvent extends \Sodaho\Container\Container
 
 // ==================== Types Written Other Than the Class Is Declared ====================
 
+// A class type written in another case than declared
 class ServiceWithLowercaseType
 {
     // @phpstan-ignore class.nameCase, class.nameCase (written in another case on purpose: parameter and property)
@@ -421,6 +469,7 @@ class ServiceWithLowercaseType
     }
 }
 
+// An optional interface type written in another case than declared
 class ServiceWithOptionalLowercaseInterface
 {
     // @phpstan-ignore interface.nameCase, interface.nameCase (written in another case on purpose: parameter and property)
@@ -429,6 +478,7 @@ class ServiceWithOptionalLowercaseInterface
     }
 }
 
+// An optional dependency on a class that does not exist
 class ServiceWithOptionalMissingClass
 {
     // @phpstan-ignore class.notFound, class.notFound (missing on purpose: parameter and property)
@@ -439,6 +489,7 @@ class ServiceWithOptionalMissingClass
 
 // ==================== Classes That Cannot Be Instantiated ====================
 
+// Cannot be instantiated: its constructor is private
 class ServiceWithPrivateConstructor
 {
     private function __construct()
@@ -446,6 +497,7 @@ class ServiceWithPrivateConstructor
     }
 }
 
+// Needs an abstract class
 class ServiceNeedingAbstract
 {
     public function __construct(public AbstractService $service)
@@ -455,6 +507,7 @@ class ServiceNeedingAbstract
 
 // ==================== A Class That Would Have Got a Default, Had It Been Created ====================
 
+// Would get the default for ServiceInterface, but its constructor throws
 class ServiceWithOptionalInterfaceThatThrows
 {
     public function __construct(public ?ServiceInterface $service = null)
@@ -465,6 +518,7 @@ class ServiceWithOptionalInterfaceThatThrows
 
 // ==================== Two Parameters of One Type That Both Get Their Default ====================
 
+// Two optional parameters of one type and one of another
 class ServiceWithTwoOptionalsOfOneType
 {
     public function __construct(
@@ -477,6 +531,7 @@ class ServiceWithTwoOptionalsOfOneType
 
 // ==================== A Default in Front of a Dependency Whose Factory Registers ====================
 
+// A default for ServiceInterface, then a dependency whose factory may register
 class ServiceWithOptionalInterfaceThenService
 {
     public function __construct(public ?ServiceInterface $service = null, public ?TestService $later = null)
@@ -486,6 +541,7 @@ class ServiceWithOptionalInterfaceThenService
 
 // ==================== Services That Ask for a Container ====================
 
+// Asks for this container class
 class ServiceNeedingContainer
 {
     public function __construct(public \Sodaho\Container\Container $container)
@@ -493,6 +549,7 @@ class ServiceNeedingContainer
     }
 }
 
+// Asks for the PSR-11 container interface
 class ServiceNeedingPsrContainer
 {
     public function __construct(public \Psr\Container\ContainerInterface $container)
@@ -500,6 +557,7 @@ class ServiceNeedingPsrContainer
     }
 }
 
+// Asks for the PSR-11 container interface, optional
 class ServiceWithOptionalPsrContainer
 {
     public function __construct(public ?\Psr\Container\ContainerInterface $container = null)
@@ -509,6 +567,7 @@ class ServiceWithOptionalPsrContainer
 
 // ==================== A Class in a Union With null or false ====================
 
+// An interface or false
 class ServiceWithFalseUnion
 {
     public function __construct(public ServiceInterface|false $service = false)
@@ -516,6 +575,7 @@ class ServiceWithFalseUnion
     }
 }
 
+// An interface, false or null
 class ServiceWithFalseOrNullUnion
 {
     public function __construct(public ServiceInterface|false|null $service = null)
@@ -523,6 +583,7 @@ class ServiceWithFalseOrNullUnion
     }
 }
 
+// A class that cannot be built, or false
 class ServiceWithUnbuildableFalseUnion
 {
     public function __construct(public ServiceWithConfig|false $service = false)
@@ -530,6 +591,7 @@ class ServiceWithUnbuildableFalseUnion
     }
 }
 
+// A class or false, without a default
 class ServiceWithFalseUnionNoDefault
 {
     public function __construct(public TestService|false $service)
@@ -537,6 +599,7 @@ class ServiceWithFalseUnionNoDefault
     }
 }
 
+// A class or a string: another union
 class ServiceWithClassOrStringUnion
 {
     public function __construct(public TestService|string $value = 'default')

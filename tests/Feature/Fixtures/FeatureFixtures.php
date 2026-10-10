@@ -8,11 +8,13 @@ use Sodaho\Container\Container;
 
 // ==================== Interfaces ====================
 
+// The logger the application binds
 interface LoggerInterface
 {
     public function log(string $message): void;
 }
 
+// The cache the application binds
 interface CacheInterface
 {
     public function get(string $key): mixed;
@@ -20,6 +22,7 @@ interface CacheInterface
     public function set(string $key, mixed $value): void;
 }
 
+// The database the application binds
 interface DatabaseInterface
 {
     /**
@@ -30,6 +33,7 @@ interface DatabaseInterface
 
 // ==================== Implementations ====================
 
+// The logger bound in most scenarios
 class FileLogger implements LoggerInterface
 {
     public function log(string $message): void
@@ -38,6 +42,7 @@ class FileLogger implements LoggerInterface
     }
 }
 
+// A logger that drops everything: an override for tests
 class NullLogger implements LoggerInterface
 {
     public function log(string $message): void
@@ -46,6 +51,7 @@ class NullLogger implements LoggerInterface
     }
 }
 
+// Decorates another logger
 class TimestampLogger implements LoggerInterface
 {
     public function __construct(public LoggerInterface $inner)
@@ -58,6 +64,7 @@ class TimestampLogger implements LoggerInterface
     }
 }
 
+// A cache in memory
 class ArrayCache implements CacheInterface
 {
     /** @var array<string, mixed> */
@@ -74,6 +81,7 @@ class ArrayCache implements CacheInterface
     }
 }
 
+// The database bound in the bootstrap scenario
 class SqliteDatabase implements DatabaseInterface
 {
     /**
@@ -87,6 +95,7 @@ class SqliteDatabase implements DatabaseInterface
 
 // ==================== Services ====================
 
+// Needs the database and the logger
 class UserService
 {
     public function __construct(
@@ -96,6 +105,7 @@ class UserService
     }
 }
 
+// Needs the logger
 class UserController
 {
     public function __construct(public LoggerInterface $logger)
@@ -103,6 +113,7 @@ class UserController
     }
 }
 
+// Needs the logger as well: shares it with UserController
 class ProductController
 {
     public function __construct(public LoggerInterface $logger)
@@ -110,6 +121,7 @@ class ProductController
     }
 }
 
+// Needs configuration: created by a factory
 class MailerService
 {
     public function __construct(
@@ -120,6 +132,7 @@ class MailerService
     }
 }
 
+// Needs two services and configuration: created by a factory
 class ComplexService
 {
     /**
@@ -136,6 +149,7 @@ class ComplexService
 
 // ==================== Application ====================
 
+// The root of the bootstrap scenario
 class Application
 {
     public function __construct(
@@ -148,6 +162,7 @@ class Application
 
 // ==================== Service Locator Pattern ====================
 
+// Gets the container from a factory, the way to pass it
 class ServiceLocator
 {
     public function __construct(public Container $container)
