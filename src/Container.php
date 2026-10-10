@@ -58,6 +58,7 @@ class Container implements ContainerInterface
     /** @var array<string, array<string, true>> Types a created entry got a default for instead: type -> those entries */
     private array $defaulted = [];
 
+    /** Whether an 'error' hook is running: a failure inside it is not reported to the hooks again */
     private bool $reportingError = false;
 
     /**
@@ -422,6 +423,9 @@ class Container implements ContainerInterface
     }
 
     /**
+     * The exception for a circular dependency, naming the whole chain: the entries being created, then the ids that
+     * led back to one of them.
+     *
      * @param list<string> $tail Ids after the entries that are already being created
      */
     private function circular(array $tail): ContainerException

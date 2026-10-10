@@ -34,6 +34,9 @@ class DestructorTest extends TestCase
         });
     }
 
+    /**
+     * get() of TestService throws the hook's failure, with what a destructor threw in the debug message.
+     */
     private function assertHookFailureOnTop(Container $container, string $debugPart): void
     {
         try {

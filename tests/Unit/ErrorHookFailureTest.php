@@ -28,6 +28,9 @@ class ErrorHookFailureTest extends TestCase
         ];
     }
 
+    /**
+     * The debug message of a failure the container detected itself, after the hook threw: the hook's exception only.
+     */
     private function assertHookIsInTheDebugMessage(ContainerException $e, \Throwable $thrown): void
     {
         $this->assertSame(
