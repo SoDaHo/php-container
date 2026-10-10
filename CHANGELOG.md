@@ -2,6 +2,30 @@
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-10-10
+
+### Upgrading from 2.0.1
+
+Nothing to change for code that registers everything before the first `get()`, registers factories under class names that return instances of those classes, binds interfaces to classes that implement them, does not get the container itself by autowiring, and whose hooks do not throw. Otherwise:
+
+| 2.0.1 | 2.1.0 | What to change |
+|---|---|---|
+| `set()` or `bind()` from a factory, a hook or a destructor while `get()` runs was accepted for ids not on the way | It throws a `ContainerException` | Register before the first `get()`; a replacement after a failed `get()` has returned |
+| A `set()` factory under a class or interface name could return anything, `null` included | `get()` throws a `ContainerException` | Return an instance of the class, or register the value under a name that is no class |
+| `bind()` took any implementation, and the interface in any spelling | It throws for an implementation that neither implements nor extends the interface, and for an interface written otherwise than declared (another case, a leading `\`) | Bind a class that implements the interface, write the interface with `::class` |
+| An id bound to a name whose entry is of another type returned that entry | `get()` throws a `ContainerException` | Bind to something that implements the interface |
+| A parameter `Container $c` got a new, empty container, `?ContainerInterface $c = null` got `null`, `get(Container::class)` returned a new one | `get()` throws a `ContainerException` | `set(ContainerInterface::class, fn (Container $c) => $c)` (or under the class the parameter names) |
+| An `error` hook that threw replaced the exception of `get()` | `get()` throws the exception it was about to throw (same class and message), that one in `getPrevious()`, the hook's exception described in `getDebugMessage()` | A hook can no longer turn container failures into exceptions of its own: catch the container's exception where `get()` is called |
+| A `resolve` hook that threw a `NotFoundExceptionInterface` let it leave `get()` | It is wrapped in a `ContainerException` (`Resolve hook failed for 'X'.`) | Catch `ContainerException` and read `getPrevious()` |
+| `has()` was false for an id on a cycle of bindings | It is true; `get()` still throws a `ContainerException` | Code that skipped a service when `has()` was false now sees the error |
+| `T\|false $x = false` got `false` with `T` bound; `T\|false $x` without default threw `it has a union type` | The binding is used (or the class autowired), and without a default the parameter is required like `T` | Nothing, unless the default was meant to win: then remove the binding or use another type |
+| A `resolve` hook that threw undid its entry only | It also undoes every entry created while it ran; their constructors run again on the next `get()` | Nothing |
+| Messages `Cannot redefine 'X': the entry has been created or is being created.` and `Interface 'X' not found: ...` for an interface bound to itself | `... the entry has been created.` and `Interface 'X' is bound to itself: ...` | Adjust code that compares messages |
+
+### Security
+
+The container no longer fails open in these cases (details below): a `Container` parameter got a new, empty container past the application's hardened factories; `T|false` got `false` past a binding (a revocation list could be skipped); a class created by a throwing `resolve` hook kept the instance the hook had rejected; `bind()` and factories could hand out an object of another type under a class name.
+
 ### Changed
 
 - `set()` and `bind()` throw a `ContainerException` while `get()` runs, for any id: from a factory, a `resolve` or `error` hook, or a destructor that runs then. They used to throw only for the entries on the way; a factory could still bind a type an entry being created had already got the default for, and that entry kept the default without notice. The message is `Cannot define 'X' while get() is running: register definitions before it, not from a factory or a hook.`
@@ -20,6 +44,17 @@
 - `bind()` stores the implementation under its declared name. An implementation written in another case became an entry of its own, a second instance beside the one `get()` of the class created.
 - A constructor parameter whose type writes a bound interface in another case gets the binding also when the interface was not loaded before: `bind()` loads it. With an autoloader that finds a class under its declared name only (PSR-4 on a case-sensitive file system), the type stayed as written and the parameter got its default.
 - `get()` of an interface bound to itself says so: `Interface 'X' is bound to itself: bind it to a class that implements it.` (was `... not found: no implementation is bound to it.`).
+
+### Documentation
+
+- README: what a lazy object's initializer does when it fails, that `(string) $e` brings back what `getMessage()` keeps out, that `zend.exception_ignore_args` is off without a `php.ini`, that `has()` runs the autoloader and is no allowlist, that Unicode line separators in an id pass unchanged (log with `json_encode()`, as the hook example now does), that a type in another case finds a class only once it is loaded.
+- CHANGELOG 2.0.1: the new exception class and the type lock moved to Changed, internal changes listed.
+
+### Internal
+
+- PHPUnit 11 and 12 start at 11.5.50 and 12.5.8, the releases the test suite runs on with the lowest dependencies.
+- The private method that autowires a class is called `autowire()`, apart from the `resolve` hook. `following` is replaced by a counter of running `get()` calls; the defaults an entry gets are marked at once and dropped with the entry; undoing a failed hook cuts the entries back to a mark.
+- New test files by topic: registration during `get()`, the hook rollback, error hooks that throw, container injection, union types, binding checks.
 
 ## [2.0.1] - 2026-10-09
 
@@ -166,7 +201,8 @@ Only if you use the cache:
 - Event hooks (`resolve`, `error`, `cacheHit`, `cacheMiss`)
 - Dual exception messages (user-facing + debug)
 
-[Unreleased]: https://github.com/SoDaHo/php-container/compare/v2.0.1...HEAD
+[Unreleased]: https://github.com/SoDaHo/php-container/compare/v2.1.0...HEAD
+[2.1.0]: https://github.com/SoDaHo/php-container/compare/v2.0.1...v2.1.0
 [2.0.1]: https://github.com/SoDaHo/php-container/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/SoDaHo/php-container/compare/v1.1.0...v2.0.0
 [2.0.0-beta.1]: https://github.com/SoDaHo/php-container/compare/v1.1.0...v2.0.0-beta.1
